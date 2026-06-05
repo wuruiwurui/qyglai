@@ -1,0 +1,11 @@
+{
+  "provider": "doubao",
+  "apiBase": "https://ark.cn-beijing.volces.com/api/v3",
+  "apiKey": "ark-66422716-ffd0-4c5b-b354-3962526e57de-bf9d9",
+  "model": "ep-20260605102340-bwv2d",
+  "enabled": true,
+  "textGenerationEnabled": true,
+  "fileExtractionMode": "model_first",
+  "contractRiskMode": "model_first",
+  "remark": "??????"
+}
