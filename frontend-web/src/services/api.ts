@@ -382,6 +382,52 @@ export type AiModelCallLog = {
   createdAt?: string | null;
 };
 
+export type KnowledgeSpace = {
+  id: string;
+  spaceCode: string;
+  spaceName: string;
+  permissionScope: string;
+  ownerOrgId?: string;
+  status: string;
+  createdAt?: string;
+};
+
+export type KnowledgeDocument = {
+  id: string;
+  spaceId: string;
+  fileId?: string;
+  title: string;
+  docType: string;
+  sourceUrl?: string;
+  versionNo: string;
+  indexingStatus: string;
+  status: string;
+  createdAt?: string;
+};
+
+export type KnowledgeSearchHit = {
+  chunkId: string;
+  documentId: string;
+  title: string;
+  content: string;
+  score: number;
+  sourceUrl?: string;
+};
+
+export type KnowledgeAnswer = {
+  answer: string;
+  confidence: number;
+  citations: string[];
+  humanHandoffSuggested: boolean;
+};
+
+export type KnowledgeIndexResult = {
+  documentId: string;
+  title: string;
+  chunkCount: number;
+  indexingStatus: string;
+};
+
 export type SystemOrg = {
   id: string;
   parentId: string;
@@ -598,6 +644,50 @@ export function fetchAiModelCallLogs(): Promise<AiModelCallLog[]> {
   return request<AiModelCallLog[]>("/api/ai-governance/model-call-logs");
 }
 
+export function fetchKnowledgeSpaces(): Promise<KnowledgeSpace[]> {
+  return request<KnowledgeSpace[]>("/api/kb/spaces");
+}
+
+export function createKnowledgeSpace(payload: Record<string, unknown>): Promise<KnowledgeSpace> {
+  return request<KnowledgeSpace>("/api/kb/spaces", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function fetchKnowledgeDocuments(scope?: string): Promise<KnowledgeDocument[]> {
+  const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+  return request<KnowledgeDocument[]>(`/api/kb/documents${query}`);
+}
+
+export function indexKnowledgeText(payload: Record<string, unknown>): Promise<KnowledgeIndexResult> {
+  return request<KnowledgeIndexResult>("/api/kb/documents/text", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function indexKnowledgeFile(file: File, spaceId: string, title?: string): Promise<KnowledgeIndexResult> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("spaceId", spaceId);
+  if (title) form.append("title", title);
+  const response = await fetch(`${API_BASE}/api/kb/documents/file`, {
+    method: "POST",
+    headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined,
+    body: form
+  });
+  if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+  const payload = await response.json() as ApiResponse<KnowledgeIndexResult> | KnowledgeIndexResult;
+  return isApiResponse<KnowledgeIndexResult>(payload) ? payload.data : payload;
+}
+
+export function queryKnowledge(question: string, scope: string): Promise<KnowledgeAnswer> {
+  return request<KnowledgeAnswer>("/api/kb/query", {
+    method: "POST",
+    body: JSON.stringify({ question, scope, userId: "ui" })
+  });
+}
+
+export function searchKnowledge(question: string, scope: string, topK = 5): Promise<KnowledgeSearchHit[]> {
+  const params = new URLSearchParams({ question, scope, topK: String(topK) });
+  return request<KnowledgeSearchHit[]>(`/api/kb/search?${params}`);
+}
+
 export function fetchSystemOrgs(): Promise<SystemOrg[]> {
   return request<SystemOrg[]>("/api/system/orgs");
 }
@@ -746,9 +836,11 @@ export async function runEndpoint(endpoint: EndpointSpec, payload: DataRecord): 
   if (endpoint.upload) {
     const form = new FormData();
     if (payload.file instanceof File) form.append("file", payload.file);
-    form.append("businessType", String(payload.businessType ?? "document"));
-    if (payload.scenario) form.append("scenario", String(payload.scenario));
-    form.append("operatorId", String(payload.operatorId ?? "ui"));
+    Object.entries(payload).forEach(([key, value]) => {
+      if (key !== "file" && value !== undefined && value !== null && value !== "") {
+        form.append(key, String(value));
+      }
+    });
     const response = await fetch(`${API_BASE}${path}`, {
       method: endpoint.method,
       headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined,
@@ -834,6 +926,31 @@ export const endpointCatalog: EndpointSpec[] = [
     { name: "amount", label: "商机金额", type: "number", defaultValue: 120000 }
   ] },
   { key: "kb-spaces", group: "知识库", title: "知识库空间", description: "查看知识库空间", method: "GET", path: "/api/kb/spaces", primary: true },
+  { key: "kb-space-create", group: "知识库", title: "创建知识库空间", description: "创建带权限范围的知识库空间", method: "POST", path: "/api/kb/spaces", fields: [
+    { name: "name", label: "空间名称", type: "text", required: true, defaultValue: "企业制度库" },
+    { name: "code", label: "空间编码", type: "text", defaultValue: `KB-${Date.now()}` },
+    { name: "scope", label: "权限范围", type: "select", options: ["company", "finance", "legal", "sales"], defaultValue: "company" },
+    { name: "ownerOrgId", label: "归属组织ID", type: "number", defaultValue: "" }
+  ] },
+  { key: "kb-documents", group: "知识库", title: "知识文档", description: "查看已经完成索引的知识文档", method: "GET", path: "/api/kb/documents", queryFields: ["scope"], fields: [
+    { name: "scope", label: "权限范围", type: "select", options: ["company", "finance", "legal", "sales"], defaultValue: "company" }
+  ] },
+  { key: "kb-index-text", group: "知识库", title: "录入知识文本", description: "将制度、流程或业务资料切片并建立向量索引", method: "POST", path: "/api/kb/documents/text", primary: true, fields: [
+    { name: "spaceId", label: "知识库空间ID", type: "number", required: true },
+    { name: "title", label: "文档标题", type: "text", required: true, defaultValue: "合同审批制度" },
+    { name: "content", label: "文档正文", type: "textarea", required: true, defaultValue: "合同金额超过10万元时，需要部门负责人和财务负责人共同审批；包含自动续约或违约责任条款时，需要法务复核。" },
+    { name: "sourceUrl", label: "来源地址", type: "text", defaultValue: "" }
+  ] },
+  { key: "kb-index-file", group: "知识库", title: "上传知识文件", description: "解析文件并自动建立切片和向量索引", method: "POST", path: "/api/kb/documents/file", upload: true, primary: true, fields: [
+    { name: "file", label: "知识文件", type: "file", required: true },
+    { name: "spaceId", label: "知识库空间ID", type: "number", required: true },
+    { name: "title", label: "文档标题", type: "text", defaultValue: "" }
+  ] },
+  { key: "kb-search", group: "知识库", title: "知识切片检索", description: "查看问题实际命中的知识片段和相似度", method: "GET", path: "/api/kb/search", queryFields: ["question", "scope", "topK"], fields: [
+    { name: "question", label: "检索问题", type: "textarea", required: true, defaultValue: "合同金额超过10万元如何审批？" },
+    { name: "scope", label: "权限范围", type: "select", options: ["company", "finance", "legal", "sales"], defaultValue: "company" },
+    { name: "topK", label: "返回数量", type: "number", defaultValue: 5 }
+  ] },
   { key: "kb-query", group: "知识库", title: "知识库问答", description: "向企业知识库提问", method: "POST", path: "/api/kb/query", primary: true, fields: [
     { name: "question", label: "问题", type: "textarea", required: true, defaultValue: "合同金额超过10万如何审批？" },
     { name: "scope", label: "范围", type: "select", options: ["company", "finance", "legal", "sales"], defaultValue: "company" },

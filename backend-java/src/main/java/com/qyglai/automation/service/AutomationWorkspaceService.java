@@ -105,6 +105,7 @@ public class AutomationWorkspaceService {
     private final AiGatewayService aiGatewayService;
     private final WorkflowApprovalService workflowApprovalService;
     private final ObjectMapper objectMapper;
+    private final KnowledgeRagService knowledgeRagService;
 
     public AutomationWorkspaceService(ContractRecordMapper contractRecordMapper,
                                       ContractRiskItemMapper contractRiskItemMapper,
@@ -127,7 +128,8 @@ public class AutomationWorkspaceService {
                                       BusinessEventService businessEventService,
                                       AiGatewayService aiGatewayService,
                                       WorkflowApprovalService workflowApprovalService,
-                                      ObjectMapper objectMapper) {
+                                      ObjectMapper objectMapper,
+                                      KnowledgeRagService knowledgeRagService) {
         this.contractRecordMapper = contractRecordMapper;
         this.contractRiskItemMapper = contractRiskItemMapper;
         this.fileAssetMapper = fileAssetMapper;
@@ -150,6 +152,7 @@ public class AutomationWorkspaceService {
         this.aiGatewayService = aiGatewayService;
         this.workflowApprovalService = workflowApprovalService;
         this.objectMapper = objectMapper;
+        this.knowledgeRagService = knowledgeRagService;
     }
 
     /**
@@ -743,10 +746,7 @@ public class AutomationWorkspaceService {
      * @return 知识库回答
      */
     public KnowledgeAnswer queryKnowledge(KnowledgeQueryRequest request) {
-        long documentCount = kbDocumentMapper.selectCount(new LambdaQueryWrapper<KbDocumentEntity>());
-        String answer = "根据企业知识库资料，合同金额超过10万元建议进入负责人和财务复核；涉及自动续约时应追加法务复核。";
-        auditService.record("KB_QUERY", "知识库问答", "kb_space", null);
-        return new KnowledgeAnswer(answer, documentCount > 0 ? 0.89 : 0.65, List.of("合同审批制度", "法务风险清单"), documentCount == 0);
+        return knowledgeRagService.query(request);
     }
 
     /**

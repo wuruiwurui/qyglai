@@ -234,7 +234,8 @@ function formatStatus(value?: string) {
 function scenarioLabel(value?: string | null) {
   return ({
     boss_query: "老板问答",
-    file_parse_extract: "文件解析抽取"
+    file_parse_extract: "文件解析抽取",
+    knowledge_query: "知识问答"
   } as Record<string, string>)[value ?? ""] ?? value ?? "-";
 }
 
@@ -245,6 +246,11 @@ function businessTypeLabel(value?: string | null) {
     contract: "合同",
     invoice: "发票",
     ticket: "客服工单"
+    ,
+    company: "全公司知识库",
+    legal: "法务知识库",
+    finance: "财务知识库",
+    sales: "销售知识库"
   } as Record<string, string>)[value ?? ""] ?? value ?? "-";
 }
 

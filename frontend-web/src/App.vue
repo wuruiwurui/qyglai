@@ -70,7 +70,7 @@
         </div>
       </header>
 
-      <section class="module-hero">
+      <section v-if="!isKnowledgeGroup" class="module-hero">
         <div>
           <p>{{ pageDescriptions[activeGroup] }}</p>
           <h2>{{ isWorkflowGroup ? "多级审批、待办处理与完整流程追踪" : selectedEndpoint?.description ?? "选择动作开始处理业务" }}</h2>
@@ -159,8 +159,9 @@
       <AiGovernanceWorkbench v-if="isAiGovernanceGroup" />
       <PermissionManagementWorkbench v-if="isSystemGroup" />
       <WorkflowApprovalWorkbench v-if="isWorkflowGroup" />
+      <KnowledgeWorkbench v-if="isKnowledgeGroup" />
 
-      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup" class="metric-grid">
+      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup && !isKnowledgeGroup" class="metric-grid">
         <article v-for="metric in metricCards" :key="metric.name" class="metric-card" :class="metric.status">
           <span>{{ metric.name }}</span>
           <strong>{{ metric.value }}</strong>
@@ -168,7 +169,7 @@
         </article>
       </section>
 
-      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup" class="workbench-grid">
+      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup && !isKnowledgeGroup" class="workbench-grid">
         <section class="endpoint-panel">
           <div class="data-header">
             <div>
@@ -285,6 +286,7 @@ import FileWorkbench from "./components/FileWorkbench.vue";
 import AiGovernanceWorkbench from "./components/AiGovernanceWorkbench.vue";
 import PermissionManagementWorkbench from "./components/PermissionManagementWorkbench.vue";
 import WorkflowApprovalWorkbench from "./components/WorkflowApprovalWorkbench.vue";
+import KnowledgeWorkbench from "./components/KnowledgeWorkbench.vue";
 import {
   askBossAssistant,
   clearSession,
@@ -396,6 +398,7 @@ const isFileGroup = computed(() => activeGroup.value === "\u6587\u4ef6");
 const isAiGovernanceGroup = computed(() => activeGroup.value === "\u0041\u0049\u6cbb\u7406");
 const isSystemGroup = computed(() => activeGroup.value === "\u7cfb\u7edf");
 const isWorkflowGroup = computed(() => activeGroup.value === "\u6d41\u7a0b");
+const isKnowledgeGroup = computed(() => activeGroup.value === "\u77e5\u8bc6\u5e93");
 const filteredRecords = computed(() => {
   const query = keyword.value.trim().toLowerCase();
   return query ? records.value.filter((item) => JSON.stringify(item).toLowerCase().includes(query)) : records.value;
@@ -670,6 +673,24 @@ function fieldLabel(key: string) {
     code: "编码",
     name: "名称",
     description: "说明"
+    ,
+    spaceCode: "知识库空间编码",
+    spaceName: "知识库空间名称",
+    permissionScope: "权限范围",
+    ownerOrgId: "归属组织ID",
+    documentId: "知识文档ID",
+    docType: "文档类型",
+    sourceUrl: "来源地址",
+    versionNo: "版本号",
+    indexingStatus: "索引状态",
+    chunkCount: "切片数量",
+    chunkId: "知识切片ID",
+    content: "内容",
+    score: "相似度",
+    confidence: "置信度",
+    citations: "引用来源",
+    humanHandoffSuggested: "建议人工处理",
+    answer: "回答"
     ,
     operatorUserId: "操作人用户ID",
     operatorName: "操作人",
