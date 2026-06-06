@@ -270,7 +270,6 @@ public class AutomationWorkspaceService {
         } else if (scenario.contains("contract") || "contract".equalsIgnoreCase(file.getBusinessType())) {
             updateContractFromConfirmedFields(fileId, confirmedFields);
         }
-        auditService.record("FILE_FIELDS_CONFIRM", "人工确认文件抽取字段", "file_asset", fileId);
         return getFileDetail(fileId);
     }
 

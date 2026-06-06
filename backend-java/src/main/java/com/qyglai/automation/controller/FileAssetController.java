@@ -9,8 +9,12 @@ import com.qyglai.automation.dto.FileFieldConfirmRequest;
 import com.qyglai.automation.dto.FileAiProcessResult;
 import com.qyglai.automation.entity.DocParseResultEntity;
 import com.qyglai.automation.entity.FileAssetEntity;
+import com.qyglai.automation.entity.FieldCorrectionHistoryEntity;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
+import com.qyglai.automation.service.FieldCorrectionService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,9 +35,11 @@ import org.springframework.web.multipart.MultipartFile;
 public class FileAssetController {
 
     private final AutomationWorkspaceService service;
+    private final FieldCorrectionService correctionService;
 
-    public FileAssetController(AutomationWorkspaceService service) {
+    public FileAssetController(AutomationWorkspaceService service, FieldCorrectionService correctionService) {
         this.service = service;
+        this.correctionService = correctionService;
     }
 
     /**
@@ -103,7 +109,21 @@ public class FileAssetController {
      */
     @PostMapping("/{id}/confirm-fields")
     public ApiResponse<FileAssetDetail> confirmFields(@PathVariable Long id,
-                                                       @Valid @RequestBody FileFieldConfirmRequest request) {
-        return ApiResponse.ok(service.confirmFileFields(id, request.fields()));
+                                                       @Valid @RequestBody FileFieldConfirmRequest request,
+                                                       Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(correctionService.correct(id, request.fields(), request.reason(),
+                principal.userId(), principal.username()));
+    }
+
+    /**
+     * 查询文件字段修正历史。
+     *
+     * @param id 文件ID
+     * @return 字段修正历史
+     */
+    @GetMapping("/{id}/corrections")
+    public ApiResponse<List<FieldCorrectionHistoryEntity>> corrections(@PathVariable Long id) {
+        return ApiResponse.ok(correctionService.listByFile(id));
     }
 }

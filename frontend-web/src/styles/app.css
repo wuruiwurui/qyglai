@@ -1273,6 +1273,90 @@ th {
   gap: 8px;
 }
 
+.correction-reason {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+}
+
+.correction-reason input {
+  margin-top: 0;
+}
+
+.correction-history {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.correction-history-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.correction-history-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.correction-history-head span,
+.correction-meta span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.correction-history article {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.correction-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.correction-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.correction-values span {
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  background: #f6f8f7;
+  border-radius: 5px;
+  overflow-wrap: anywhere;
+}
+
+.correction-values small {
+  color: var(--muted);
+}
+
+.correction-values del {
+  color: #a33a33;
+}
+
+.correction-values ins {
+  color: #087a57;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.correction-history p {
+  margin: 0;
+  color: #485751;
+  font-size: 13px;
+}
+
 .field-grid article {
   min-height: 76px;
   padding: 11px;

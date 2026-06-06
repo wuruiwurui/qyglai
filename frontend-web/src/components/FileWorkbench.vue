@@ -95,6 +95,7 @@
 
           <div class="detail-tabs">
             <button :class="{ active: activeTab === 'fields' }" type="button" @click="activeTab = 'fields'">抽取字段</button>
+            <button :class="{ active: activeTab === 'history' }" type="button" @click="openHistory">修正历史</button>
             <button :class="{ active: activeTab === 'text' }" type="button" @click="activeTab = 'text'">解析原文</button>
             <button :class="{ active: activeTab === 'links' }" type="button" @click="activeTab = 'links'">业务入口</button>
           </div>
@@ -105,12 +106,35 @@
               <button v-if="editingFields" class="ghost-button" type="button" @click="cancelEditFields">取消</button>
               <button v-if="editingFields" class="submit-action" type="button" :disabled="state === 'loading'" @click="saveFields">保存确认</button>
             </div>
+            <label v-if="editingFields" class="correction-reason">
+              <span>修正原因</span>
+              <input v-model="correctionReason" placeholder="必填，例如：对照发票原件核实金额" />
+            </label>
             <article v-for="item in fieldItems" :key="item.key" :class="{ editable: editingFields }">
               <span>{{ fieldLabel(item.key) }}</span>
               <input v-if="editingFields" :value="editableFields[item.key] ?? item.value" @input="editableFields[item.key] = ($event.target as HTMLInputElement).value" />
               <strong v-else>{{ item.value }}</strong>
             </article>
             <div v-if="!fieldItems.length" class="file-empty">暂无结构化字段</div>
+          </section>
+
+          <section v-if="activeTab === 'history'" class="correction-history">
+            <div class="correction-history-head">
+              <div><strong>字段修正记录</strong><span>记录修改前后值、原因和操作人</span></div>
+              <button class="ghost-button" type="button" @click="loadCorrections"><RefreshCw :size="15" />刷新</button>
+            </div>
+            <article v-for="item in corrections" :key="item.id">
+              <div class="correction-meta">
+                <strong>{{ item.fieldName }}</strong>
+                <span>{{ item.operatorName || "未知用户" }} · {{ formatDate(item.createdAt) }}</span>
+              </div>
+              <div class="correction-values">
+                <span><small>修改前</small><del>{{ item.oldValue || "空值" }}</del></span>
+                <span><small>修改后</small><ins>{{ item.newValue || "空值" }}</ins></span>
+              </div>
+              <p>{{ item.reason }}</p>
+            </article>
+            <div v-if="!corrections.length" class="file-empty">该文件暂无字段修正记录</div>
           </section>
 
           <section v-if="activeTab === 'text'" class="raw-text-panel">
@@ -167,16 +191,18 @@ import {
 } from "lucide-vue-next";
 import {
   confirmFileFields,
+  fetchFileCorrections,
   fetchFileDetail,
   fetchFiles,
   processFileWithAi,
   type FileAiProcessPayload,
   type FileAsset,
-  type FileAssetDetail
+  type FileAssetDetail,
+  type FieldCorrectionHistory
 } from "../services/api";
 
 type LoadState = "idle" | "loading" | "success" | "error";
-type DetailTab = "fields" | "text" | "links";
+type DetailTab = "fields" | "history" | "text" | "links";
 
 defineEmits<{
   jump: [target: "contract" | "invoice" | "review", id: string];
@@ -192,6 +218,8 @@ const notice = ref("等待上传文件");
 const activeTab = ref<DetailTab>("fields");
 const editingFields = ref(false);
 const editableFields = ref<Record<string, string>>({});
+const correctionReason = ref("");
+const corrections = ref<FieldCorrectionHistory[]>([]);
 
 const businessTypeLabel = computed(() => ({
   contract: "合同",
@@ -253,6 +281,8 @@ async function selectFile(id: string) {
   latestResult.value = null;
   editingFields.value = false;
   editableFields.value = {};
+  correctionReason.value = "";
+  corrections.value = [];
   activeTab.value = "fields";
 }
 
@@ -289,23 +319,45 @@ function startEditFields() {
 function cancelEditFields() {
   editingFields.value = false;
   editableFields.value = {};
+  correctionReason.value = "";
 }
 
 async function saveFields() {
   if (!detail.value) return;
+  if (!correctionReason.value.trim()) {
+    state.value = "error";
+    notice.value = "请填写字段修正原因";
+    return;
+  }
   state.value = "loading";
   notice.value = "正在保存人工确认字段";
   try {
-    detail.value = await confirmFileFields(detail.value.file.id, editableFields.value);
+    detail.value = await confirmFileFields(detail.value.file.id, editableFields.value, correctionReason.value.trim());
     latestResult.value = null;
     editingFields.value = false;
     editableFields.value = {};
+    correctionReason.value = "";
+    await loadCorrections();
     state.value = "success";
     notice.value = "字段已确认，业务记录已同步更新";
   } catch (error) {
     state.value = "error";
     notice.value = error instanceof Error ? error.message : "字段确认失败";
   }
+}
+
+async function openHistory() {
+  activeTab.value = "history";
+  await loadCorrections();
+}
+
+async function loadCorrections() {
+  if (!detail.value) return;
+  corrections.value = await fetchFileCorrections(detail.value.file.id);
+}
+
+function formatDate(value?: string) {
+  return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-";
 }
 
 function formatBytes(size?: number) {

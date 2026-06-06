@@ -308,6 +308,35 @@ export type FileAssetDetail = {
   reviewTasks: ReviewTaskRecord[];
 };
 
+export type FieldCorrectionHistory = {
+  /** 修正记录ID。 */
+  id: string;
+  /** 修正批次ID。 */
+  batchId: string;
+  /** 文件ID。 */
+  fileId: string;
+  /** 业务类型。 */
+  businessType?: string;
+  /** 业务记录ID。 */
+  businessId?: string;
+  /** 字段编码。 */
+  fieldKey: string;
+  /** 字段中文名称。 */
+  fieldName: string;
+  /** 修正前值。 */
+  oldValue?: string;
+  /** 修正后值。 */
+  newValue?: string;
+  /** 修正原因。 */
+  reason: string;
+  /** 操作人用户ID。 */
+  operatorUserId?: string;
+  /** 操作人名称。 */
+  operatorName?: string;
+  /** 修正时间。 */
+  createdAt?: string;
+};
+
 export type AiRuntimeStatus = {
   provider: string;
   model: string;
@@ -538,11 +567,15 @@ export function fetchFileDetail(id: string): Promise<FileAssetDetail> {
   return request<FileAssetDetail>(`/api/files/${id}/detail`);
 }
 
-export function confirmFileFields(id: string, fields: Record<string, string>): Promise<FileAssetDetail> {
+export function confirmFileFields(id: string, fields: Record<string, string>, reason: string): Promise<FileAssetDetail> {
   return request<FileAssetDetail>(`/api/files/${id}/confirm-fields`, {
     method: "POST",
-    body: JSON.stringify({ fields })
+    body: JSON.stringify({ fields, reason })
   });
+}
+
+export function fetchFileCorrections(id: string): Promise<FieldCorrectionHistory[]> {
+  return request<FieldCorrectionHistory[]>(`/api/files/${id}/corrections`);
 }
 
 export async function fetchAiRuntimeStatus(): Promise<AiRuntimeStatus> {
