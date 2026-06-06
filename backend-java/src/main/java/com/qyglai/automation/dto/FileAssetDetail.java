@@ -7,6 +7,7 @@ import com.qyglai.automation.entity.DocParseResultEntity;
 import com.qyglai.automation.entity.FileAssetEntity;
 import com.qyglai.automation.entity.InvoiceRecordEntity;
 import com.qyglai.automation.entity.ReviewTaskEntity;
+import com.qyglai.automation.entity.WorkflowInstanceEntity;
 
 /**
  * 文件资产详情，聚合文件、解析结果、业务台账和复核任务。
@@ -31,5 +32,9 @@ public record FileAssetDetail(
         /**
          * 文件生成或关联的复核任务。
          */
-        List<ReviewTaskEntity> reviewTasks) {
+        List<ReviewTaskEntity> reviewTasks,
+        /**
+         * 关联业务记录的审批流程实例。
+         */
+        List<WorkflowInstanceEntity> workflowInstances) {
 }

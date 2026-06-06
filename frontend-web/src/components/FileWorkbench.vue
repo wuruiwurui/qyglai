@@ -102,14 +102,21 @@
 
           <section v-if="activeTab === 'fields'" class="field-grid">
             <div class="field-actions">
+              <span v-if="editingFields" class="correction-change-count" :class="{ empty: changedFieldCount === 0 }">
+                {{ changedFieldCount > 0 ? `已修改 ${changedFieldCount} 个字段` : "请先修改需要修正的字段" }}
+              </span>
               <button v-if="!editingFields" class="ghost-button" type="button" @click="startEditFields">编辑字段</button>
               <button v-if="editingFields" class="ghost-button" type="button" @click="cancelEditFields">取消</button>
-              <button v-if="editingFields" class="submit-action" type="button" :disabled="state === 'loading'" @click="saveFields">保存确认</button>
+              <button v-if="editingFields" class="submit-action" type="button" :disabled="state === 'loading'" @click="saveFields">
+                <Loader2 v-if="state === 'loading'" class="spin" :size="15" />
+                保存确认
+              </button>
             </div>
             <label v-if="editingFields" class="correction-reason">
               <span>修正原因</span>
-              <input v-model="correctionReason" placeholder="必填，例如：对照发票原件核实金额" />
+              <input v-model="correctionReason" :class="{ invalid: correctionMessage && !correctionReason.trim() }" placeholder="必填，例如：对照发票原件核实金额" @input="correctionMessage = ''" />
             </label>
+            <p v-if="correctionMessage" class="correction-inline-message" :class="correctionMessageType">{{ correctionMessage }}</p>
             <article v-for="item in fieldItems" :key="item.key" :class="{ editable: editingFields }">
               <span>{{ fieldLabel(item.key) }}</span>
               <input v-if="editingFields" :value="editableFields[item.key] ?? item.value" @input="editableFields[item.key] = ($event.target as HTMLInputElement).value" />
@@ -163,11 +170,19 @@
                 <small>{{ formatRiskLevel(task.riskLevel) }} · {{ formatStatus(task.status) }}</small>
               </span>
             </button>
-            <div v-if="!detail.contract && !detail.invoice && !detail.reviewTasks.length" class="file-empty">暂无关联业务记录</div>
+            <button v-for="workflow in detail.workflowInstances" :key="workflow.id" type="button" @click="$emit('jump', 'workflow', workflow.id)">
+              <Route :size="18" />
+              <span>
+                <strong>查看审批流程</strong>
+                <small>{{ formatStatus(workflow.status) }} · {{ workflow.currentNode }}</small>
+              </span>
+            </button>
+            <div v-if="!detail.contract && !detail.invoice && !detail.reviewTasks.length && !detail.workflowInstances.length" class="file-empty">暂无关联业务记录</div>
           </section>
 
           <section class="risk-strip">
-            <strong>风险提示</strong>
+            <strong>{{ detail.file.parseStatus === "correction_required" ? "审批已驳回" : "风险提示" }}</strong>
+            <span v-if="detail.file.parseStatus === 'correction_required'">请编辑并修正字段，保存后系统将自动重新发起审批。</span>
             <span v-for="risk in riskItems" :key="risk">{{ risk }}</span>
             <em v-if="!riskItems.length">当前文件没有生成风险项</em>
           </section>
@@ -187,6 +202,7 @@ import {
   Play,
   ReceiptText,
   RefreshCw,
+  Route,
   UploadCloud
 } from "lucide-vue-next";
 import {
@@ -205,7 +221,7 @@ type LoadState = "idle" | "loading" | "success" | "error";
 type DetailTab = "fields" | "history" | "text" | "links";
 
 defineEmits<{
-  jump: [target: "contract" | "invoice" | "review", id: string];
+  jump: [target: "contract" | "invoice" | "review" | "workflow", id: string];
 }>();
 
 const files = ref<FileAsset[]>([]);
@@ -220,6 +236,8 @@ const editingFields = ref(false);
 const editableFields = ref<Record<string, string>>({});
 const correctionReason = ref("");
 const corrections = ref<FieldCorrectionHistory[]>([]);
+const correctionMessage = ref("");
+const correctionMessageType = ref<"error" | "success">("error");
 
 const businessTypeLabel = computed(() => ({
   contract: "合同",
@@ -268,6 +286,9 @@ const riskItems = computed(() => {
   if (detailExtraction?.risks?.length) return detailExtraction.risks;
   return detail.value?.reviewTasks.map((task) => `${task.riskLevel}：${task.title}`) ?? [];
 });
+const changedFieldCount = computed(() => fieldItems.value.filter((item) =>
+  String(editableFields.value[item.key] ?? item.value ?? "").trim() !== String(item.value ?? "").trim()
+).length);
 
 onMounted(loadFiles);
 
@@ -282,6 +303,7 @@ async function selectFile(id: string) {
   editingFields.value = false;
   editableFields.value = {};
   correctionReason.value = "";
+  correctionMessage.value = "";
   corrections.value = [];
   activeTab.value = "fields";
 }
@@ -305,6 +327,9 @@ async function submitUpload() {
     activeTab.value = "fields";
     state.value = "success";
     notice.value = "处理完成，已生成解析结果和业务记录";
+    if (latestResult.value.workflowInstance) {
+      notice.value = `处理完成，已自动发起审批 ${latestResult.value.workflowInstance.instanceId}`;
+    }
   } catch (error) {
     state.value = "error";
     notice.value = error instanceof Error ? error.message : "文件处理失败";
@@ -313,6 +338,7 @@ async function submitUpload() {
 
 function startEditFields() {
   editableFields.value = Object.fromEntries(fieldItems.value.map((item) => [item.key, String(item.value ?? "")]));
+  correctionMessage.value = "";
   editingFields.value = true;
 }
 
@@ -320,6 +346,7 @@ function cancelEditFields() {
   editingFields.value = false;
   editableFields.value = {};
   correctionReason.value = "";
+  correctionMessage.value = "";
 }
 
 async function saveFields() {
@@ -327,10 +354,20 @@ async function saveFields() {
   if (!correctionReason.value.trim()) {
     state.value = "error";
     notice.value = "请填写字段修正原因";
+    correctionMessageType.value = "error";
+    correctionMessage.value = "保存前必须填写修正原因。";
+    return;
+  }
+  if (changedFieldCount.value === 0) {
+    state.value = "error";
+    notice.value = "没有字段发生变化";
+    correctionMessageType.value = "error";
+    correctionMessage.value = "当前字段值没有变化，请修改后再保存。";
     return;
   }
   state.value = "loading";
   notice.value = "正在保存人工确认字段";
+  correctionMessage.value = "";
   try {
     detail.value = await confirmFileFields(detail.value.file.id, editableFields.value, correctionReason.value.trim());
     latestResult.value = null;
@@ -340,9 +377,13 @@ async function saveFields() {
     await loadCorrections();
     state.value = "success";
     notice.value = "字段已确认，业务记录已同步更新";
+    correctionMessageType.value = "success";
+    correctionMessage.value = "保存成功，修正历史和审计记录已生成。";
   } catch (error) {
     state.value = "error";
     notice.value = error instanceof Error ? error.message : "字段确认失败";
+    correctionMessageType.value = "error";
+    correctionMessage.value = notice.value;
   }
 }
 
@@ -440,6 +481,10 @@ function formatStatus(value?: string) {
     uploaded: "已上传",
     pending: "待处理",
     pending_review: "待复核",
+    pending_approval: "审批中",
+    approved: "已通过",
+    rejected: "已驳回",
+    correction_required: "待修正",
     passed: "已通过",
     success: "成功",
     failed: "失败",

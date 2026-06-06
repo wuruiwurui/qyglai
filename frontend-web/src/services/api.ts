@@ -1,7 +1,7 @@
 /**
  * 前端统一 API 层。
  *
- * 这里负责登录态、鉴权请求头、Java 后端接口、Python AI 文件解析接口和页面动作元数据。
+ * 这里负责登录态、鉴权请求头、Java 后端接口和页面动作元数据。
  */
 
 export type ApiResponse<T> = {
@@ -298,6 +298,7 @@ export type FileAiProcessPayload = {
   extraction: ExtractionPayload;
   businessRecord?: ContractRecord | InvoiceRecord | Record<string, unknown>;
   reviewTask?: ReviewTaskRecord | null;
+  workflowInstance?: { instanceId: string; workflowCode: string; currentNode: string; status: string } | null;
 };
 
 export type FileAssetDetail = {
@@ -306,6 +307,7 @@ export type FileAssetDetail = {
   contract?: ContractRecord | null;
   invoice?: InvoiceRecord | null;
   reviewTasks: ReviewTaskRecord[];
+  workflowInstances: WorkflowInstance[];
 };
 
 export type FieldCorrectionHistory = {
@@ -473,7 +475,6 @@ export type EndpointRunResult = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
-const AI_API_BASE = import.meta.env.VITE_AI_API_BASE ?? "/ai-api";
 const TOKEN_KEY = "qyglai_token";
 const SESSION_KEY = "qyglai_session";
 
@@ -579,25 +580,18 @@ export function fetchFileCorrections(id: string): Promise<FieldCorrectionHistory
 }
 
 export async function fetchAiRuntimeStatus(): Promise<AiRuntimeStatus> {
-  const response = await fetch(`${AI_API_BASE}/api/v1/model-status`);
-  if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
-  return await response.json() as AiRuntimeStatus;
+  return request<AiRuntimeStatus>("/api/ai-governance/runtime-status");
 }
 
 export async function fetchAiRuntimeConfig(): Promise<AiRuntimeConfig> {
-  const response = await fetch(`${AI_API_BASE}/api/v1/model-config`);
-  if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
-  return await response.json() as AiRuntimeConfig;
+  return request<AiRuntimeConfig>("/api/ai-governance/runtime-config");
 }
 
 export async function saveAiRuntimeConfig(config: AiRuntimeConfig): Promise<AiRuntimeConfig> {
-  const response = await fetch(`${AI_API_BASE}/api/v1/model-config`, {
+  return request<AiRuntimeConfig>("/api/ai-governance/runtime-config", {
     method: "POST",
-    headers: { "Content-Type": "application/json;charset=UTF-8" },
     body: JSON.stringify(config)
   });
-  if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
-  return await response.json() as AiRuntimeConfig;
 }
 
 export function fetchAiModelCallLogs(): Promise<AiModelCallLog[]> {
@@ -749,12 +743,11 @@ function buildJsonBody(endpoint: EndpointSpec, payload: DataRecord) {
 
 export async function runEndpoint(endpoint: EndpointSpec, payload: DataRecord): Promise<EndpointRunResult> {
   const path = buildPath(endpoint.path, payload, endpoint.queryFields);
-  if (endpoint.source === "python") return runPythonEndpoint(endpoint, payload, path);
-
   if (endpoint.upload) {
     const form = new FormData();
     if (payload.file instanceof File) form.append("file", payload.file);
     form.append("businessType", String(payload.businessType ?? "document"));
+    if (payload.scenario) form.append("scenario", String(payload.scenario));
     form.append("operatorId", String(payload.operatorId ?? "ui"));
     const response = await fetch(`${API_BASE}${path}`, {
       method: endpoint.method,
@@ -768,24 +761,6 @@ export async function runEndpoint(endpoint: EndpointSpec, payload: DataRecord): 
 
   if (endpoint.method === "GET") return { path, data: await request<unknown>(path) };
   return { path, data: await request<unknown>(path, { method: endpoint.method, body: JSON.stringify(buildJsonBody(endpoint, payload)) }) };
-}
-
-async function runPythonEndpoint(endpoint: EndpointSpec, payload: DataRecord, path: string): Promise<EndpointRunResult> {
-  if (endpoint.upload) {
-    const form = new FormData();
-    if (payload.file instanceof File) form.append("file", payload.file);
-    if (payload.scenario) form.append("scenario", String(payload.scenario));
-    const response = await fetch(`${AI_API_BASE}${path}`, { method: endpoint.method, body: form });
-    if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
-    return { path, data: await response.json() };
-  }
-  const response = await fetch(`${AI_API_BASE}${path}`, {
-    method: endpoint.method,
-    headers: { "Content-Type": "application/json;charset=UTF-8" },
-    body: endpoint.method === "GET" ? undefined : JSON.stringify(buildJsonBody(endpoint, payload))
-  });
-  if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
-  return { path, data: await response.json() };
 }
 
 const textProcessFields: EndpointField[] = [
@@ -804,7 +779,7 @@ const simpleCreateFields: EndpointField[] = [
 
 export const pageDescriptions: Record<string, string> = {
   经营: "老板视角经营总览、服务健康和自动化模块。",
-  文件: "上传业务文件，调用 Python AI 解析 Word、Excel、PDF、文本并抽取字段。",
+  文件: "上传业务文件，由 Java 服务解析 Word、Excel、PDF、文本并通过 AI 抽取字段。",
   合同: "合同台账、合同信息抽取、风险识别和复核触发。",
   财务: "发票解析、供应商对账批次、差异明细和财务处理建议。",
   客服: "客服工单分类、优先级判断、情绪识别和建议回复。",
@@ -823,7 +798,7 @@ export const pageDescriptions: Record<string, string> = {
 export const endpointCatalog: EndpointSpec[] = [
   { key: "modules", group: "经营", title: "自动化模块", description: "查看平台已启用能力", method: "GET", path: "/api/modules", primary: true },
   { key: "health", group: "经营", title: "服务健康", description: "检查 Java 后端服务状态", method: "GET", path: "/api/health" },
-  { key: "ai-file-extract", group: "文件", title: "AI文件解析抽取", description: "调用 Python 服务解析文件并抽取字段", method: "POST", path: "/api/v1/files/parse-and-extract", source: "python", upload: true, primary: true, fields: [
+  { key: "ai-file-extract", group: "文件", title: "AI文件解析抽取", description: "调用 Java 服务解析文件并抽取字段", method: "POST", path: "/api/files/parse-and-extract", upload: true, primary: true, fields: [
     { name: "file", label: "文件", type: "file", required: true },
     { name: "scenario", label: "抽取场景", type: "select", options: ["contract", "invoice", "statement", "general"], defaultValue: "contract" }
   ] },
@@ -843,7 +818,7 @@ export const endpointCatalog: EndpointSpec[] = [
   { key: "invoice-parse", group: "财务", title: "发票解析", description: "触发发票识别和校验", method: "POST", path: "/api/invoices/parse", primary: true, fields: textProcessFields.map((field) => field.name === "content" ? { ...field, defaultValue: "发票号码 FP20260604001，软件服务费8600元，税率6%。" } : field.name === "scenario" ? { ...field, defaultValue: "invoice" } : field) },
   { key: "reconciliation-batches", group: "财务", title: "对账批次", description: "查看供应商对账批次", method: "GET", path: "/api/reconciliation/batches" },
   { key: "reconciliation-items", group: "财务", title: "对账明细", description: "查看对账差异明细", method: "GET", path: "/api/reconciliation/items" },
-  { key: "reconciliation-ai", group: "财务", title: "AI对账分析", description: "调用 Python 分析供应商对账差异", method: "POST", path: "/api/v1/reconciliation/analyze", source: "python", fields: [
+  { key: "reconciliation-ai", group: "财务", title: "AI对账分析", description: "调用 Java 分析供应商对账差异", method: "POST", path: "/api/ai-tasks/reconciliation/analyze", fields: [
     { name: "supplierName", label: "供应商", type: "text", defaultValue: "示例供应商" },
     { name: "statementAmount", label: "对账单金额", type: "number", defaultValue: 10000 },
     { name: "invoiceAmount", label: "发票金额", type: "number", defaultValue: 8600 },
@@ -852,7 +827,7 @@ export const endpointCatalog: EndpointSpec[] = [
   { key: "tickets", group: "客服", title: "客服工单", description: "查看工单分类结果", method: "GET", path: "/api/tickets", primary: true },
   { key: "ticket-classify", group: "客服", title: "工单分类", description: "触发工单分类与建议回复", method: "POST", path: "/api/tickets/classify", primary: true, fields: textProcessFields.map((field) => field.name === "content" ? { ...field, defaultValue: "客户投诉交付进度很慢，希望今天给出明确排期。" } : field.name === "scenario" ? { ...field, defaultValue: "ticket" } : field) },
   { key: "sales-followups", group: "销售", title: "销售跟进", description: "查看销售跟进任务", method: "GET", path: "/api/sales/followups", primary: true },
-  { key: "sales-ai", group: "销售", title: "AI跟进提醒", description: "调用 Python 生成销售跟进动作", method: "POST", path: "/api/v1/sales/followup-reminder", source: "python", fields: [
+  { key: "sales-ai", group: "销售", title: "AI跟进提醒", description: "调用 Java 生成销售跟进动作", method: "POST", path: "/api/ai-tasks/sales/followup-reminder", fields: [
     { name: "customerName", label: "客户", type: "text", defaultValue: "重点客户A" },
     { name: "opportunityStage", label: "阶段", type: "select", options: ["线索", "报价", "谈判", "签约"], defaultValue: "报价" },
     { name: "lastContactDays", label: "未联系天数", type: "number", defaultValue: 4 },
@@ -878,7 +853,7 @@ export const endpointCatalog: EndpointSpec[] = [
     { name: "variables", label: "流程变量", type: "json", defaultValue: "{\n  \"businessId\": 1,\n  \"source\": \"frontend\"\n}" }
   ] },
   { key: "review-tasks", group: "复核", title: "复核任务", description: "查看人工复核任务", method: "GET", path: "/api/review/tasks", primary: true },
-  { key: "review-ai", group: "复核", title: "AI复核建议", description: "调用 Python 生成复核建议", method: "POST", path: "/api/v1/review/advice", source: "python", fields: [
+  { key: "review-ai", group: "复核", title: "AI复核建议", description: "调用 Java 生成复核建议", method: "POST", path: "/api/ai-tasks/review/advice", fields: [
     { name: "scenario", label: "场景", type: "select", options: ["contract", "invoice", "ticket"], defaultValue: "contract" },
     { name: "content", label: "复核内容", type: "textarea", defaultValue: "合同金额120000元，含违约条款。" },
     { name: "riskLevel", label: "风险等级", type: "select", options: ["low", "medium", "high"], defaultValue: "high" }
@@ -902,9 +877,9 @@ export const endpointCatalog: EndpointSpec[] = [
     { name: "payload", label: "事件载荷", type: "json", defaultValue: "{\n  \"source\": \"frontend\"\n}" }
   ] },
   { key: "ai-providers", group: "AI治理", title: "模型供应商", description: "查看 AI 模型供应商", method: "GET", path: "/api/ai-governance/providers", primary: true },
-  { key: "ai-runtime-config", group: "AI治理", title: "查看真实AI配置", description: "查看 Python AI 服务当前运行模型配置，密钥会脱敏", method: "GET", path: "/api/v1/model-config", source: "python" },
-  { key: "ai-runtime-status", group: "AI治理", title: "真实AI运行状态", description: "查看真实模型是否启用、场景开关和最近一次调用状态", method: "GET", path: "/api/v1/model-status", source: "python", primary: true },
-  { key: "ai-runtime-save", group: "AI治理", title: "保存真实AI配置", description: "在页面配置豆包、OpenAI兼容模型或本地模型网关", method: "POST", path: "/api/v1/model-config", source: "python", primary: true, fields: [
+  { key: "ai-runtime-config", group: "AI治理", title: "查看真实AI配置", description: "查看 Java AI 网关当前运行模型配置，密钥会脱敏", method: "GET", path: "/api/ai-governance/runtime-config" },
+  { key: "ai-runtime-status", group: "AI治理", title: "真实AI运行状态", description: "查看真实模型是否启用、场景开关和最近一次调用状态", method: "GET", path: "/api/ai-governance/runtime-status", primary: true },
+  { key: "ai-runtime-save", group: "AI治理", title: "保存真实AI配置", description: "在页面配置豆包、OpenAI兼容模型或本地模型网关", method: "POST", path: "/api/ai-governance/runtime-config", primary: true, fields: [
     { name: "provider", label: "供应商", type: "select", options: ["doubao", "openai", "local", "mock"], defaultValue: "doubao" },
     { name: "apiBase", label: "API地址", type: "text", defaultValue: "https://ark.cn-beijing.volces.com/api/v3", help: "豆包火山方舟 OpenAI 兼容地址通常为 https://ark.cn-beijing.volces.com/api/v3" },
     { name: "apiKey", label: "API Key", type: "text", defaultValue: "", help: "保存后仅在服务端本地配置文件中持久化，页面查询会脱敏。" },
@@ -916,7 +891,7 @@ export const endpointCatalog: EndpointSpec[] = [
     { name: "remark", label: "备注", type: "textarea", defaultValue: "豆包真实模型配置" }
   ] },
   { key: "ai-prompts", group: "AI治理", title: "Prompt模板", description: "查看 Prompt 模板", method: "GET", path: "/api/ai-governance/prompt-templates" },
-  { key: "ai-prompt-evaluate", group: "AI治理", title: "Prompt评测", description: "调用 Python 评测 Prompt 质量", method: "POST", path: "/api/v1/prompts/evaluate", source: "python", fields: [
+  { key: "ai-prompt-evaluate", group: "AI治理", title: "Prompt评测", description: "调用 Java 评测 Prompt 质量", method: "POST", path: "/api/ai-tasks/prompts/evaluate", fields: [
     { name: "prompt", label: "Prompt", type: "textarea", defaultValue: "请基于{input}生成结构化经营日报，并列出数据来源。" },
     { name: "scenario", label: "场景", type: "select", options: ["report", "contract", "ticket"], defaultValue: "report" }
   ] },

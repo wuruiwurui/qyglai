@@ -38,6 +38,7 @@ public class WorkflowApprovalService {
     private final WorkflowTaskMapper taskMapper;
     private final WorkflowActionLogMapper actionLogMapper;
     private final AuditService auditService;
+    private final BusinessApprovalStatusService businessApprovalStatusService;
     private final ObjectMapper objectMapper;
 
     public WorkflowApprovalService(WorkflowDefinitionMapper definitionMapper,
@@ -45,12 +46,14 @@ public class WorkflowApprovalService {
                                    WorkflowTaskMapper taskMapper,
                                    WorkflowActionLogMapper actionLogMapper,
                                    AuditService auditService,
+                                   BusinessApprovalStatusService businessApprovalStatusService,
                                    ObjectMapper objectMapper) {
         this.definitionMapper = definitionMapper;
         this.instanceMapper = instanceMapper;
         this.taskMapper = taskMapper;
         this.actionLogMapper = actionLogMapper;
         this.auditService = auditService;
+        this.businessApprovalStatusService = businessApprovalStatusService;
         this.objectMapper = objectMapper;
     }
 
@@ -85,19 +88,33 @@ public class WorkflowApprovalService {
     @Transactional(rollbackFor = Exception.class)
     public WorkflowInstanceSummary start(WorkflowStartRequest request, Long initiatorUserId) {
         WorkflowDefinitionEntity definition = findOrCreateDefinition(request.workflowCode());
+        String businessType = stringVariable(request.variables(), "businessType", definition.getScenario());
+        Long businessId = longVariable(request.variables(), "businessId");
+        if (businessId != null) {
+            WorkflowInstanceEntity running = instanceMapper.selectOne(new LambdaQueryWrapper<WorkflowInstanceEntity>()
+                    .eq(WorkflowInstanceEntity::getDefinitionId, definition.getId())
+                    .eq(WorkflowInstanceEntity::getBusinessType, businessType)
+                    .eq(WorkflowInstanceEntity::getBusinessId, businessId)
+                    .eq(WorkflowInstanceEntity::getStatus, "running")
+                    .last("LIMIT 1"));
+            if (running != null) {
+                return summary(running, definition.getWorkflowCode());
+            }
+        }
         List<NodeDefinition> nodes = parseNodes(definition.getDefinitionJson());
         NodeDefinition first = nodes.getFirst();
 
         WorkflowInstanceEntity instance = new WorkflowInstanceEntity();
         instance.setId(IdWorker.getId());
         instance.setDefinitionId(definition.getId());
-        instance.setBusinessType(stringVariable(request.variables(), "businessType", definition.getScenario()));
-        instance.setBusinessId(longVariable(request.variables(), "businessId"));
+        instance.setBusinessType(businessType);
+        instance.setBusinessId(businessId);
         instance.setInitiatorUserId(initiatorUserId);
         instance.setCurrentNode(first.code());
         instance.setVariablesJson(toJson(request.variables()));
         instance.setStatus("running");
         instanceMapper.insert(instance);
+        businessApprovalStatusService.markPending(businessType, businessId);
 
         WorkflowTaskEntity task = createTask(instance.getId(), first, initiatorUserId);
         recordAction(instance.getId(), task.getId(), first.code(), "start", initiatorUserId, null,
@@ -106,9 +123,42 @@ public class WorkflowApprovalService {
         return summary(instance, definition.getWorkflowCode());
     }
 
+    /**
+     * 根据业务类型自动发起对应审批流程。
+     */
+    public WorkflowInstanceSummary startForBusiness(String businessType, Long businessId, Long fileId,
+                                                    String title, Long initiatorUserId) {
+        String workflowCode = switch (businessType == null ? "" : businessType.toLowerCase()) {
+            case "contract", "contract_record" -> "contract_approval";
+            case "invoice", "invoice_record" -> "invoice_approval";
+            default -> null;
+        };
+        if (workflowCode == null || businessId == null) {
+            return null;
+        }
+        return start(new WorkflowStartRequest(workflowCode, "automatic", Map.of(
+                "businessType", businessType,
+                "businessId", businessId,
+                "fileId", fileId == null ? "" : fileId,
+                "source", "file_ai_process",
+                "title", title == null || title.isBlank() ? "业务自动审批" : title
+        )), initiatorUserId);
+    }
+
     /** 查询全部流程实例。 */
     public List<WorkflowInstanceEntity> listInstances() {
         return instanceMapper.selectList(new LambdaQueryWrapper<WorkflowInstanceEntity>()
+                .orderByDesc(WorkflowInstanceEntity::getStartedAt));
+    }
+
+    /** 查询业务记录关联的审批实例。 */
+    public List<WorkflowInstanceEntity> listByBusiness(String businessType, Long businessId) {
+        if (businessType == null || businessId == null) {
+            return List.of();
+        }
+        return instanceMapper.selectList(new LambdaQueryWrapper<WorkflowInstanceEntity>()
+                .eq(WorkflowInstanceEntity::getBusinessType, businessType)
+                .eq(WorkflowInstanceEntity::getBusinessId, businessId)
                 .orderByDesc(WorkflowInstanceEntity::getStartedAt));
     }
 
@@ -167,6 +217,7 @@ public class WorkflowApprovalService {
             instance.setCurrentNode("DONE");
             instance.setEndedAt(LocalDateTime.now());
             instanceMapper.updateById(instance);
+            businessApprovalStatusService.markApproved(instance);
             recordAction(instance.getId(), task.getId(), task.getNodeCode(), "complete", operatorUserId, null, "流程审批完成");
         } else {
             NodeDefinition next = nodes.get(currentIndex + 1);
@@ -187,6 +238,7 @@ public class WorkflowApprovalService {
         instance.setCurrentNode("REJECTED");
         instance.setEndedAt(LocalDateTime.now());
         instanceMapper.updateById(instance);
+        businessApprovalStatusService.markRejected(instance);
         auditService.record("WORKFLOW_REJECT", "审批驳回", "workflow_task", task.getId());
         return detail(instance.getId());
     }

@@ -1273,6 +1273,19 @@ th {
   gap: 8px;
 }
 
+.correction-change-count {
+  align-self: center;
+  margin-right: auto;
+  color: #087a57;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.correction-change-count.empty {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .correction-reason {
   grid-column: 1 / -1;
   display: grid;
@@ -1281,6 +1294,31 @@ th {
 
 .correction-reason input {
   margin-top: 0;
+}
+
+.correction-reason input.invalid {
+  border-color: #c9443b;
+  box-shadow: 0 0 0 2px rgba(201, 68, 59, .1);
+}
+
+.correction-inline-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 5px;
+  font-size: 13px;
+}
+
+.correction-inline-message.error {
+  color: #a5302a;
+  background: #fff0ef;
+  border: 1px solid #efc4c1;
+}
+
+.correction-inline-message.success {
+  color: #087a57;
+  background: #e9f7ef;
+  border: 1px solid #b9dfcc;
 }
 
 .correction-history {

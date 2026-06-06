@@ -17,4 +17,5 @@ dist/
 *.log
 logs/
 .env
+backend-java/runtime/model_config.json
 ~$*.docx

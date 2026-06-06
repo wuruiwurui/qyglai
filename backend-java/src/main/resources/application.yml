@@ -63,9 +63,6 @@ automation:
   security:
     jwt-secret: qyglai-local-secret-change-in-production-2026
     token-ttl-seconds: 86400
-  ai-service:
-    base-url: http://localhost:8000
-    timeout-ms: 30000
   messaging:
     kafka-enabled: false
     default-topic: qyglai-business-events

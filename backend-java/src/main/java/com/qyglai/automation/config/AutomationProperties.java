@@ -1,11 +1,13 @@
 package com.qyglai.automation.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.stereotype.Component;
 
 /**
  * 企业自动化平台的基础设施开关配置。
  */
 @ConfigurationProperties(prefix = "automation")
+@Component
 public class AutomationProperties {
 
     /**

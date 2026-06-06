@@ -4,12 +4,17 @@ import java.util.List;
 
 import com.qyglai.automation.common.ApiResponse;
 import com.qyglai.automation.dto.SimpleCreateRequest;
+import com.qyglai.automation.dto.AiRuntimeConfig;
+import com.qyglai.automation.dto.AiRuntimeConfigView;
+import com.qyglai.automation.dto.AiRuntimeStatus;
 import com.qyglai.automation.entity.AiEvaluationSampleEntity;
 import com.qyglai.automation.entity.AiModelCallLogEntity;
 import com.qyglai.automation.entity.AiModelProviderEntity;
 import com.qyglai.automation.entity.AiPromptTemplateEntity;
 import com.qyglai.automation.service.AiGovernanceService;
 import com.qyglai.automation.service.AutomationWorkspaceService;
+import com.qyglai.automation.service.JavaAiModelConfigService;
+import com.qyglai.automation.service.JavaAiModelGateway;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,10 +32,30 @@ public class AiGovernanceController {
 
     private final AutomationWorkspaceService service;
     private final AiGovernanceService aiGovernanceService;
+    private final JavaAiModelConfigService modelConfigService;
+    private final JavaAiModelGateway modelGateway;
 
-    public AiGovernanceController(AutomationWorkspaceService service, AiGovernanceService aiGovernanceService) {
+    public AiGovernanceController(AutomationWorkspaceService service, AiGovernanceService aiGovernanceService,
+                                  JavaAiModelConfigService modelConfigService, JavaAiModelGateway modelGateway) {
         this.service = service;
         this.aiGovernanceService = aiGovernanceService;
+        this.modelConfigService = modelConfigService;
+        this.modelGateway = modelGateway;
+    }
+
+    @GetMapping("/runtime-config")
+    public ApiResponse<AiRuntimeConfigView> runtimeConfig() {
+        return ApiResponse.ok(modelConfigService.view());
+    }
+
+    @PostMapping("/runtime-config")
+    public ApiResponse<AiRuntimeConfigView> saveRuntimeConfig(@RequestBody AiRuntimeConfig request) {
+        return ApiResponse.ok(modelConfigService.save(request));
+    }
+
+    @GetMapping("/runtime-status")
+    public ApiResponse<AiRuntimeStatus> runtimeStatus() {
+        return ApiResponse.ok(modelGateway.status());
     }
 
     /**

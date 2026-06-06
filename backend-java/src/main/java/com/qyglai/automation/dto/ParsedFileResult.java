@@ -3,7 +3,7 @@ package com.qyglai.automation.dto;
 import java.util.List;
 
 /**
- * Python AI服务返回的文件解析结果。
+ * Java 文件解析结果。
  *
  * @param filename 文件名
  * @param contentType 内容类型

@@ -461,11 +461,12 @@ function switchGroup(group: GroupName) {
   selectEndpoint(endpointCatalog.find((item) => item.group === group && item.primary) ?? activeEndpoints.value[0]);
 }
 
-function handleFileJump(target: "contract" | "invoice" | "review", id: string) {
+function handleFileJump(target: "contract" | "invoice" | "review" | "workflow", id: string) {
   const groupMap = {
     contract: "\u5408\u540c",
     invoice: "\u8d22\u52a1",
-    review: "\u590d\u6838"
+    review: "\u590d\u6838",
+    workflow: "\u6d41\u7a0b"
   } as const;
   activeGroup.value = groupMap[target] as GroupName;
   records.value = [];
@@ -669,6 +670,17 @@ function fieldLabel(key: string) {
     code: "编码",
     name: "名称",
     description: "说明"
+    ,
+    operatorUserId: "操作人用户ID",
+    operatorName: "操作人",
+    actionCode: "操作编码",
+    actionName: "操作名称",
+    targetType: "目标类型",
+    targetId: "目标ID",
+    requestIp: "请求IP",
+    userAgent: "用户代理",
+    beforeJson: "修改前快照",
+    afterJson: "修改后快照"
   };
   return labels[key] ?? key;
 }
@@ -683,6 +695,10 @@ function valueLabel(value: string) {
     uploaded: "已上传",
     pending: "待处理",
     pending_review: "待复核",
+    pending_approval: "审批中",
+    approved: "已通过",
+    rejected: "已驳回",
+    correction_required: "待修正",
     passed: "已通过",
     failed: "失败",
     open: "待处理",
@@ -698,6 +714,9 @@ function valueLabel(value: string) {
     not_called: "尚未调用",
     fallback: "已降级",
     success: "成功"
+    ,
+    FILE_FIELD_CORRECTION: "文件字段修正",
+    file_asset: "文件资产"
   };
   return labels[value] ?? value;
 }

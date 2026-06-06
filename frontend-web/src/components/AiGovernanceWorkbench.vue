@@ -164,7 +164,7 @@ type LoadState = "idle" | "loading" | "success" | "error";
 const status = ref<AiRuntimeStatus | null>(null);
 const logs = ref<AiModelCallLog[]>([]);
 const state = ref<LoadState>("idle");
-const notice = ref("配置保存后会立即影响 Python AI 服务运行策略");
+const notice = ref("配置保存后会立即影响 Java AI 模型网关运行策略");
 
 // 表单对象保持完整字段，避免保存时覆盖掉服务端已有运行策略。
 const config = ref<AiRuntimeConfig>({

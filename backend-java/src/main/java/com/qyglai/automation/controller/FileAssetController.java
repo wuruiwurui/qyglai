@@ -7,12 +7,14 @@ import com.qyglai.automation.dto.DocParseSaveRequest;
 import com.qyglai.automation.dto.FileAssetDetail;
 import com.qyglai.automation.dto.FileFieldConfirmRequest;
 import com.qyglai.automation.dto.FileAiProcessResult;
+import com.qyglai.automation.dto.ParseAndExtractResponse;
 import com.qyglai.automation.entity.DocParseResultEntity;
 import com.qyglai.automation.entity.FileAssetEntity;
 import com.qyglai.automation.entity.FieldCorrectionHistoryEntity;
 import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
 import com.qyglai.automation.service.FieldCorrectionService;
+import com.qyglai.automation.service.AiGatewayService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -36,10 +38,13 @@ public class FileAssetController {
 
     private final AutomationWorkspaceService service;
     private final FieldCorrectionService correctionService;
+    private final AiGatewayService aiGatewayService;
 
-    public FileAssetController(AutomationWorkspaceService service, FieldCorrectionService correctionService) {
+    public FileAssetController(AutomationWorkspaceService service, FieldCorrectionService correctionService,
+                               AiGatewayService aiGatewayService) {
         this.service = service;
         this.correctionService = correctionService;
+        this.aiGatewayService = aiGatewayService;
     }
 
     /**
@@ -96,8 +101,16 @@ public class FileAssetController {
      */
     @PostMapping("/ai-process")
     public ApiResponse<FileAiProcessResult> aiProcess(@RequestPart("file") MultipartFile file,
-                                                       @RequestParam(defaultValue = "general") String businessType) {
-        return ApiResponse.ok(service.processFileWithAi(file, businessType));
+                                                       @RequestParam(defaultValue = "general") String businessType,
+                                                       Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.processFileWithAi(file, businessType, principal.userId()));
+    }
+
+    @PostMapping("/parse-and-extract")
+    public ApiResponse<ParseAndExtractResponse> parseAndExtract(@RequestPart("file") MultipartFile file,
+                                                                @RequestParam(defaultValue = "general") String scenario) {
+        return ApiResponse.ok(aiGatewayService.parseAndExtractFile(file, scenario));
     }
 
     /**

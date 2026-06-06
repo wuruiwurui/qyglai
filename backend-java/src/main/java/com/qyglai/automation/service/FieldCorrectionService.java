@@ -35,15 +35,18 @@ public class FieldCorrectionService {
     private final AutomationWorkspaceService workspaceService;
     private final FieldCorrectionHistoryMapper historyMapper;
     private final AuditService auditService;
+    private final WorkflowApprovalService workflowApprovalService;
     private final ObjectMapper objectMapper;
 
     public FieldCorrectionService(AutomationWorkspaceService workspaceService,
                                   FieldCorrectionHistoryMapper historyMapper,
                                   AuditService auditService,
+                                  WorkflowApprovalService workflowApprovalService,
                                   ObjectMapper objectMapper) {
         this.workspaceService = workspaceService;
         this.historyMapper = historyMapper;
         this.auditService = auditService;
+        this.workflowApprovalService = workflowApprovalService;
         this.objectMapper = objectMapper;
     }
 
@@ -93,7 +96,9 @@ public class FieldCorrectionService {
         auditService.recordDetailed(operatorUserId, operatorName, "FILE_FIELD_CORRECTION", "修正文件抽取字段",
                 "file_asset", fileId, toJson(Map.of("fields", beforeFields)),
                 toJson(Map.of("fields", afterFields, "reason", reason, "batchId", String.valueOf(batchId))));
-        return result;
+        workflowApprovalService.startForBusiness(result.file().getBusinessType(), businessId, fileId,
+                result.file().getOriginalName() + "修正后重新审批", operatorUserId);
+        return workspaceService.getFileDetail(fileId);
     }
 
     /**

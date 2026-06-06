@@ -103,6 +103,7 @@ public class AutomationWorkspaceService {
     private final AuditService auditService;
     private final BusinessEventService businessEventService;
     private final AiGatewayService aiGatewayService;
+    private final WorkflowApprovalService workflowApprovalService;
     private final ObjectMapper objectMapper;
 
     public AutomationWorkspaceService(ContractRecordMapper contractRecordMapper,
@@ -125,6 +126,7 @@ public class AutomationWorkspaceService {
                                       AuditService auditService,
                                       BusinessEventService businessEventService,
                                       AiGatewayService aiGatewayService,
+                                      WorkflowApprovalService workflowApprovalService,
                                       ObjectMapper objectMapper) {
         this.contractRecordMapper = contractRecordMapper;
         this.contractRiskItemMapper = contractRiskItemMapper;
@@ -146,6 +148,7 @@ public class AutomationWorkspaceService {
         this.auditService = auditService;
         this.businessEventService = businessEventService;
         this.aiGatewayService = aiGatewayService;
+        this.workflowApprovalService = workflowApprovalService;
         this.objectMapper = objectMapper;
     }
 
@@ -232,7 +235,10 @@ public class AutomationWorkspaceService {
                         .or()
                         .eq(ReviewTaskEntity::getBusinessId, invoice == null ? -1L : invoice.getId()))
                 .orderByDesc(ReviewTaskEntity::getCreatedAt));
-        return new FileAssetDetail(file, parseResult, contract, invoice, reviewTasks);
+        String linkedBusinessType = invoice != null ? "invoice" : contract != null ? "contract" : null;
+        Long linkedBusinessId = invoice != null ? invoice.getId() : contract != null ? contract.getId() : null;
+        return new FileAssetDetail(file, parseResult, contract, invoice, reviewTasks,
+                workflowApprovalService.listByBusiness(linkedBusinessType, linkedBusinessId));
     }
 
     /**
@@ -301,7 +307,7 @@ public class AutomationWorkspaceService {
     }
 
     /**
-     * 上传文件后调用 Python AI 服务完成解析、抽取、入库和复核任务生成。
+     * 上传文件后由 Java AI 能力完成解析、抽取、入库和复核任务生成。
      *
      * @param file 上传文件
      * @param businessType 业务类型，支持 contract、invoice、statement、general
@@ -309,6 +315,14 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public FileAiProcessResult processFileWithAi(MultipartFile file, String businessType) {
+        return processFileWithAi(file, businessType, null);
+    }
+
+    /**
+     * 上传文件后完成AI处理，并以当前用户身份自动发起业务审批。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public FileAiProcessResult processFileWithAi(MultipartFile file, String businessType, Long initiatorUserId) {
         FileAssetEntity asset = uploadFile(file, businessType);
         ParseAndExtractResponse aiResult = aiGatewayService.parseAndExtractFile(file, asset.getBusinessType());
         if (aiResult == null || aiResult.parsed() == null || aiResult.extraction() == null) {
@@ -325,7 +339,9 @@ public class AutomationWorkspaceService {
         fileAssetMapper.updateById(asset);
         auditService.record("FILE_AI_PROCESS", "文件AI解析入库", "file_asset", asset.getId());
         businessEventService.publish("file.ai_processed", asset.getId(), Map.of("businessType", asset.getBusinessType()));
-        return new FileAiProcessResult(asset, parseResult, aiResult.extraction(), businessRecord, reviewTask);
+        WorkflowInstanceSummary workflow = workflowApprovalService.startForBusiness(asset.getBusinessType(),
+                extractBusinessId(businessRecord), asset.getId(), asset.getOriginalName() + "审批", initiatorUserId);
+        return new FileAiProcessResult(asset, parseResult, aiResult.extraction(), businessRecord, reviewTask, workflow);
     }
 
     private Object createBusinessRecordFromExtraction(FileAssetEntity asset, ExtractionResult extraction) {

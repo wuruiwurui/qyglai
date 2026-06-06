@@ -43,6 +43,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/notifications/**").access(anyOf(hasAuthority("*"), hasAuthority("notification:view")))
                         .requestMatchers("/api/integrations/**").access(anyOf(hasAuthority("*"), hasAuthority("integration:view")))
                         .requestMatchers("/api/ai-governance/**").access(anyOf(hasAuthority("*"), hasAuthority("ai:manage")))
+                        .requestMatchers("/api/ai-tasks/**").authenticated()
                         .requestMatchers("/api/audit/**").access(anyOf(hasAuthority("*"), hasAuthority("audit:view")))
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
