@@ -537,6 +537,22 @@ CREATE TABLE workflow_task (
   CONSTRAINT fk_workflow_task_instance FOREIGN KEY (instance_id) REFERENCES workflow_instance (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='流程任务表';
 
+CREATE TABLE workflow_action_log (
+  id BIGINT NOT NULL PRIMARY KEY COMMENT '主键ID',
+  instance_id BIGINT NOT NULL COMMENT '流程实例ID',
+  task_id BIGINT NULL COMMENT '流程任务ID',
+  node_code VARCHAR(128) NOT NULL COMMENT '节点编码',
+  action VARCHAR(32) NOT NULL COMMENT '审批动作',
+  operator_user_id BIGINT NULL COMMENT '操作人用户ID',
+  target_user_id BIGINT NULL COMMENT '目标用户ID',
+  comment VARCHAR(1000) NULL COMMENT '审批意见',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '动作发生时间',
+  KEY idx_workflow_action_instance (instance_id, created_at),
+  KEY idx_workflow_action_task (task_id),
+  CONSTRAINT fk_workflow_action_instance FOREIGN KEY (instance_id) REFERENCES workflow_instance (id),
+  CONSTRAINT fk_workflow_action_task FOREIGN KEY (task_id) REFERENCES workflow_task (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='审批动作历史表';
+
 CREATE TABLE review_task (
   id BIGINT NOT NULL PRIMARY KEY COMMENT '主键ID',
   task_no VARCHAR(128) NOT NULL COMMENT '任务编号',

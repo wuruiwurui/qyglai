@@ -121,6 +121,97 @@ export type HealthResponse = {
   time: string;
 };
 
+export type WorkflowDefinition = {
+  /** 流程定义ID。 */
+  id: string;
+  /** 流程编码。 */
+  workflowCode: string;
+  /** 流程名称。 */
+  workflowName: string;
+  /** 业务场景。 */
+  scenario: string;
+  /** 版本号。 */
+  versionNo: number;
+  /** 节点定义JSON。 */
+  definitionJson: string;
+  /** 状态。 */
+  status: string;
+};
+
+export type WorkflowInstance = {
+  /** 流程实例ID。 */
+  id: string;
+  /** 流程定义ID。 */
+  definitionId: string;
+  /** 业务类型。 */
+  businessType: string;
+  /** 业务记录ID。 */
+  businessId?: string;
+  /** 发起人用户ID。 */
+  initiatorUserId?: string;
+  /** 当前节点。 */
+  currentNode: string;
+  /** 流程变量JSON。 */
+  variablesJson?: string;
+  /** 实例状态。 */
+  status: string;
+  /** 发起时间。 */
+  startedAt?: string;
+  /** 结束时间。 */
+  endedAt?: string;
+};
+
+export type WorkflowTask = {
+  /** 审批任务ID。 */
+  id: string;
+  /** 流程实例ID。 */
+  instanceId: string;
+  /** 节点编码。 */
+  nodeCode: string;
+  /** 节点名称。 */
+  nodeName: string;
+  /** 处理人用户ID。 */
+  assigneeUserId?: string;
+  /** 任务状态。 */
+  status: string;
+  /** 截止时间。 */
+  dueTime?: string;
+  /** 完成时间。 */
+  completedAt?: string;
+};
+
+export type WorkflowActionLog = {
+  /** 动作日志ID。 */
+  id: string;
+  /** 流程实例ID。 */
+  instanceId: string;
+  /** 流程任务ID。 */
+  taskId?: string;
+  /** 节点编码。 */
+  nodeCode: string;
+  /** 动作类型。 */
+  action: string;
+  /** 操作人用户ID。 */
+  operatorUserId?: string;
+  /** 目标用户ID。 */
+  targetUserId?: string;
+  /** 审批意见。 */
+  comment?: string;
+  /** 动作时间。 */
+  createdAt?: string;
+};
+
+export type WorkflowInstanceDetail = {
+  /** 流程实例。 */
+  instance: WorkflowInstance;
+  /** 流程定义。 */
+  definition: WorkflowDefinition;
+  /** 节点任务。 */
+  tasks: WorkflowTask[];
+  /** 审批历史。 */
+  history: WorkflowActionLog[];
+};
+
 export type FileAsset = {
   id: string;
   fileName: string;
@@ -540,6 +631,34 @@ export function assignRolePermissions(id: string, ids: string[]): Promise<string
   return request<string[]>(`/api/system/roles/${id}/permission-ids`, { method: "PUT", body: JSON.stringify({ ids }) });
 }
 
+export function fetchWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
+  return request<WorkflowDefinition[]>("/api/workflows/definitions");
+}
+
+export function fetchWorkflowInstances(): Promise<WorkflowInstance[]> {
+  return request<WorkflowInstance[]>("/api/workflows/instances");
+}
+
+export function fetchWorkflowTasks(): Promise<WorkflowTask[]> {
+  return request<WorkflowTask[]>("/api/workflows/tasks");
+}
+
+export function fetchWorkflowDetail(instanceId: string): Promise<WorkflowInstanceDetail> {
+  return request<WorkflowInstanceDetail>(`/api/workflows/instances/${instanceId}`);
+}
+
+export function startWorkflowApproval(payload: Record<string, unknown>): Promise<{ instanceId: string }> {
+  return request<{ instanceId: string }>("/api/workflows/start", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function handleWorkflowTask(taskId: string, payload: Record<string, unknown>): Promise<WorkflowInstanceDetail> {
+  return request<WorkflowInstanceDetail>(`/api/workflows/tasks/${taskId}/actions`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function saveWorkflowDefinition(payload: Record<string, unknown>): Promise<WorkflowDefinition> {
+  return request<WorkflowDefinition>("/api/workflows/definitions", { method: "POST", body: JSON.stringify(payload) });
+}
+
 export async function processFileWithAi(file: File, businessType: string): Promise<FileAiProcessPayload> {
   const form = new FormData();
   form.append("file", file);
@@ -659,7 +778,7 @@ export const pageDescriptions: Record<string, string> = {
   销售: "销售跟进任务、逾期提醒和重点客户推进。",
   知识库: "企业知识库空间、制度问答和引用来源。",
   报表: "经营日报、周报、老板摘要生成和报表记录。",
-  流程: "轻量工作流启动、流程任务跟踪和自动化编排。",
+  流程: "企业审批流程发起、多级流转、任务转交、审批历史和流程设计。",
   复核: "人工复核任务、复核完成和 AI 复核建议。",
   消息: "站内通知、系统提醒和待办推送。",
   系统: "组织、用户、角色、权限和 RBAC 基础管理。",
@@ -719,7 +838,7 @@ export const endpointCatalog: EndpointSpec[] = [
     { name: "audience", label: "接收对象", type: "select", options: ["boss", "finance", "sales", "operation"], defaultValue: "boss" },
     { name: "autoSend", label: "自动发送", type: "switch", defaultValue: false }
   ] },
-  { key: "workflow-tasks", group: "流程", title: "流程任务", description: "查看轻量工作流任务", method: "GET", path: "/api/workflows/tasks", primary: true },
+  { key: "workflow-tasks", group: "流程", title: "流程任务", description: "查看企业审批待办任务", method: "GET", path: "/api/workflows/tasks", primary: true },
   { key: "workflow-start", group: "流程", title: "启动流程", description: "启动自动化流程实例", method: "POST", path: "/api/workflows/start", primary: true, fields: [
     { name: "workflowCode", label: "流程编码", type: "text", defaultValue: "ui_demo_flow" },
     { name: "initiator", label: "发起人", type: "text", defaultValue: "ui" },

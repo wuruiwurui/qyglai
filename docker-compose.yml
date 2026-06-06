@@ -1,0 +1,48 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: qyglai-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: qyglai
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  postgres:
+    image: postgres:16
+    container_name: qyglai-postgres
+    environment:
+      POSTGRES_DB: qyglai
+      POSTGRES_USER: qyglai
+      POSTGRES_PASSWORD: qyglai123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: qyglai-redis
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: qyglai-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: qyglai
+      MINIO_ROOT_PASSWORD: qyglai123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+volumes:
+  mysql-data:
+  postgres-data:
+  minio-data:

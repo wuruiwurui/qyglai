@@ -42,6 +42,9 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 management:
+  health:
+    redis:
+      enabled: false
   endpoints:
     web:
       exposure:

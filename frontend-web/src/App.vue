@@ -73,7 +73,7 @@
       <section class="module-hero">
         <div>
           <p>{{ pageDescriptions[activeGroup] }}</p>
-          <h2>{{ selectedEndpoint?.description ?? "选择动作开始处理业务" }}</h2>
+          <h2>{{ isWorkflowGroup ? "多级审批、待办处理与完整流程追踪" : selectedEndpoint?.description ?? "选择动作开始处理业务" }}</h2>
         </div>
         <div class="hero-badges">
           <span>{{ activeEndpoints.length }} 个接口</span>
@@ -158,8 +158,9 @@
       <FileWorkbench v-if="isFileGroup" @jump="handleFileJump" />
       <AiGovernanceWorkbench v-if="isAiGovernanceGroup" />
       <PermissionManagementWorkbench v-if="isSystemGroup" />
+      <WorkflowApprovalWorkbench v-if="isWorkflowGroup" />
 
-      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup" class="metric-grid">
+      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup" class="metric-grid">
         <article v-for="metric in metricCards" :key="metric.name" class="metric-card" :class="metric.status">
           <span>{{ metric.name }}</span>
           <strong>{{ metric.value }}</strong>
@@ -167,7 +168,7 @@
         </article>
       </section>
 
-      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup" class="workbench-grid">
+      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup" class="workbench-grid">
         <section class="endpoint-panel">
           <div class="data-header">
             <div>
@@ -283,6 +284,7 @@ import {
 import FileWorkbench from "./components/FileWorkbench.vue";
 import AiGovernanceWorkbench from "./components/AiGovernanceWorkbench.vue";
 import PermissionManagementWorkbench from "./components/PermissionManagementWorkbench.vue";
+import WorkflowApprovalWorkbench from "./components/WorkflowApprovalWorkbench.vue";
 import {
   askBossAssistant,
   clearSession,
@@ -393,6 +395,7 @@ const activeEndpoints = computed(() => endpointCatalog.filter((item) => item.gro
 const isFileGroup = computed(() => activeGroup.value === "\u6587\u4ef6");
 const isAiGovernanceGroup = computed(() => activeGroup.value === "\u0041\u0049\u6cbb\u7406");
 const isSystemGroup = computed(() => activeGroup.value === "\u7cfb\u7edf");
+const isWorkflowGroup = computed(() => activeGroup.value === "\u6d41\u7a0b");
 const filteredRecords = computed(() => {
   const query = keyword.value.trim().toLowerCase();
   return query ? records.value.filter((item) => JSON.stringify(item).toLowerCase().includes(query)) : records.value;
