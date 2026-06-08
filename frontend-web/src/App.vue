@@ -40,14 +40,17 @@
         <button v-for="group in groups" :key="group" :class="{ active: activeGroup === group }" type="button" @click="switchGroup(group)">
           <component :is="groupIcons[group]" :size="17" />
           <span>{{ group }}</span>
-          <em>{{ countEndpoints(group) }}</em>
         </button>
       </nav>
 
       <section class="sidebar-footer">
-        <p>后端状态</p>
-        <strong :class="health?.status === 'UP' ? 'up' : 'down'">{{ health?.status ?? "UNKNOWN" }}</strong>
-        <small>{{ session.roles.join(", ") || "ADMIN" }}</small>
+        <div class="service-state">
+          <span :class="health?.status === 'UP' ? 'up' : 'down'"></span>
+          <div>
+            <strong>{{ health?.status === "UP" ? "服务正常" : "服务异常" }}</strong>
+            <small>{{ session.user.realName }}</small>
+          </div>
+        </div>
         <button class="logout-button" type="button" @click="logout">退出登录</button>
       </section>
     </aside>
@@ -55,32 +58,11 @@
     <section class="workspace">
       <header class="topbar">
         <div>
-          <p>当前页面 / {{ activeGroup }}</p>
-          <h1>{{ activeGroup }}专属工作台</h1>
-        </div>
-        <div class="top-actions">
-          <button class="ghost-button" type="button" @click="loadHealth">
-            <Wifi :size="17" />
-            检查服务
-          </button>
-          <button class="sync-button" type="button" @click="refreshPage">
-            <RefreshCw :size="17" />
-            刷新页面
-          </button>
+          <p>工作台 / {{ activeGroup }}</p>
+          <h1>{{ activeGroup }}</h1>
+          <small>{{ pageDescriptions[activeGroup] }}</small>
         </div>
       </header>
-
-      <section v-if="!isKnowledgeGroup" class="module-hero">
-        <div>
-          <p>{{ pageDescriptions[activeGroup] }}</p>
-          <h2>{{ isWorkflowGroup ? "多级审批、待办处理与完整流程追踪" : selectedEndpoint?.description ?? "选择动作开始处理业务" }}</h2>
-        </div>
-        <div class="hero-badges">
-          <span>{{ activeEndpoints.length }} 个接口</span>
-          <span>{{ records.length }} 条数据</span>
-          <span>{{ dataStateText }}</span>
-        </div>
-      </section>
 
       <section v-if="activeGroup === '经营'" class="overview-grid">
         <section class="assistant-panel">
@@ -169,65 +151,65 @@
         </article>
       </section>
 
-      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup && !isKnowledgeGroup" class="workbench-grid">
-        <section class="endpoint-panel">
-          <div class="data-header">
-            <div>
-              <p>{{ activeGroup }}</p>
-              <h2>业务动作</h2>
-            </div>
-            <span class="state-pill" :class="dataState">{{ dataStateText }}</span>
-          </div>
-
-          <div class="endpoint-toolbar vertical">
-            <button v-for="endpoint in activeEndpoints" :key="endpoint.key" :class="{ selected: selectedEndpoint?.key === endpoint.key, primary: endpoint.primary }" type="button" @click="selectEndpoint(endpoint)">
-              <span>{{ endpoint.source === 'python' ? 'AI' : endpoint.method }}</span>
+      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup && !isKnowledgeGroup" class="business-workspace">
+        <header class="business-action-bar">
+          <div class="business-tabs" role="tablist" aria-label="业务视图">
+            <button
+              v-for="endpoint in activeEndpoints"
+              :key="endpoint.key"
+              :class="{ active: selectedEndpoint?.key === endpoint.key }"
+              type="button"
+              @click="selectEndpoint(endpoint)"
+            >
               {{ endpoint.title }}
             </button>
           </div>
+          <span class="state-pill" :class="dataState">{{ dataStateText }}</span>
+        </header>
 
-          <form v-if="selectedEndpoint?.fields?.length" class="action-form" @submit.prevent="executeSelected">
-            <label v-for="field in selectedEndpoint.fields" :key="field.name" :class="{ wide: field.type === 'textarea' || field.type === 'json' || field.type === 'file' }">
-              <span>{{ field.label }}<em v-if="field.required">*</em></span>
-              <input v-if="field.type === 'text' || field.type === 'number'" :type="field.type" :value="getFormValue(field.name)" @input="setFormValue(field.name, ($event.target as HTMLInputElement).value)" />
-              <select v-else-if="field.type === 'select'" :value="getFormValue(field.name)" @change="setFormValue(field.name, ($event.target as HTMLSelectElement).value)">
-                <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
-              </select>
-              <textarea v-else-if="field.type === 'textarea' || field.type === 'json'" :value="getFormValue(field.name)" rows="5" @input="setFormValue(field.name, ($event.target as HTMLTextAreaElement).value)" />
-              <input v-else-if="field.type === 'file'" type="file" @change="handleFileChange(field.name, $event)" />
-              <input v-else-if="field.type === 'switch'" :checked="getBooleanValue(field.name)" type="checkbox" @change="setFormValue(field.name, ($event.target as HTMLInputElement).checked)" />
-              <small v-if="field.help">{{ field.help }}</small>
-            </label>
-            <button class="submit-action" type="submit" :disabled="dataState === 'loading'">
-              <Play :size="16" />
-              执行动作
-            </button>
-          </form>
-          <button v-else class="submit-action" type="button" :disabled="dataState === 'loading'" @click="executeSelected">
-            <Play :size="16" />
-            加载数据
+        <form v-if="selectedEndpoint?.fields?.length" class="business-filter-bar" @submit.prevent="executeSelected">
+          <label v-for="field in selectedEndpoint.fields" :key="field.name" :class="{ wide: field.type === 'textarea' || field.type === 'json' || field.type === 'file' }">
+            <span>{{ field.label }}</span>
+            <input v-if="field.type === 'text' || field.type === 'number'" :type="field.type" :value="getFormValue(field.name)" @input="setFormValue(field.name, ($event.target as HTMLInputElement).value)" />
+            <select v-else-if="field.type === 'select'" :value="getFormValue(field.name)" @change="setFormValue(field.name, ($event.target as HTMLSelectElement).value)">
+              <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
+            </select>
+            <textarea v-else-if="field.type === 'textarea' || field.type === 'json'" :value="getFormValue(field.name)" rows="3" @input="setFormValue(field.name, ($event.target as HTMLTextAreaElement).value)" />
+            <input v-else-if="field.type === 'file'" type="file" @change="handleFileChange(field.name, $event)" />
+            <input v-else-if="field.type === 'switch'" :checked="getBooleanValue(field.name)" type="checkbox" @change="setFormValue(field.name, ($event.target as HTMLInputElement).checked)" />
+          </label>
+          <button class="primary-button" type="submit" :disabled="dataState === 'loading'">
+            <Loader2 v-if="dataState === 'loading'" class="spin" :size="16" />
+            <Search v-else-if="selectedEndpoint?.method === 'GET'" :size="16" />
+            <Play v-else :size="16" />
+            {{ selectedEndpoint?.method === "GET" ? "查询" : "提交" }}
           </button>
-        </section>
+        </form>
 
-        <section class="data-panel">
+        <section class="data-panel business-data-panel">
           <div class="table-head">
             <div>
               <h2>{{ selectedEndpoint?.title ?? "业务数据" }}</h2>
-              <p>{{ filteredRecords.length }} 条记录</p>
+              <p>共 {{ filteredRecords.length }} 条记录，点击行查看详情</p>
             </div>
-            <div class="table-tools">
-              <Search :size="16" />
-              <input v-model="keyword" placeholder="搜索本页数据" />
+            <div class="table-head-actions">
+              <label class="table-tools">
+                <Search :size="16" />
+                <input v-model="keyword" placeholder="搜索当前列表" />
+              </label>
+              <button class="icon-button" type="button" title="刷新列表" aria-label="刷新列表" @click="executeSelected">
+                <RefreshCw :size="16" />
+              </button>
             </div>
           </div>
-          <div v-if="!pagedRecords.length" class="empty-table">暂无数据，选择业务动作后执行。</div>
+          <div v-if="!pagedRecords.length" class="empty-table">暂无数据</div>
           <div v-else class="table-wrap">
             <table>
               <thead>
                 <tr><th v-for="column in tableColumns" :key="column">{{ fieldLabel(column) }}</th></tr>
               </thead>
               <tbody>
-                <tr v-for="(record, index) in pagedRecords" :key="index" @click="selectedRecord = record">
+                <tr v-for="(record, index) in pagedRecords" :key="index" :class="{ selected: selectedRecord === record }" @click="selectedRecord = record">
                   <td v-for="column in tableColumns" :key="column">{{ formatValue(record[column]) }}</td>
                 </tr>
               </tbody>
@@ -239,18 +221,31 @@
             <button type="button" :disabled="page === pageCount" @click="page += 1">下一页</button>
           </footer>
         </section>
-
-        <aside class="side-stack">
-          <section class="queue-panel">
-            <h3>接口返回</h3>
-            <pre>{{ resultPreview }}</pre>
-          </section>
-          <section class="queue-panel">
-            <h3>选中详情</h3>
-            <pre>{{ selectedRecordPreview }}</pre>
-          </section>
-        </aside>
       </section>
+
+      <div v-if="selectedRecord" class="detail-drawer-mask" @click.self="selectedRecord = null">
+        <aside class="detail-drawer" aria-label="记录详情">
+          <header>
+            <div>
+              <span>{{ activeGroup }}详情</span>
+              <h2>{{ selectedEndpoint?.title ?? "业务记录" }}</h2>
+            </div>
+            <button class="icon-button" type="button" title="关闭详情" aria-label="关闭详情" @click="selectedRecord = null">
+              <X :size="18" />
+            </button>
+          </header>
+          <section class="detail-summary">
+            <span class="state-pill success">已加载</span>
+            <small>字段信息来自当前列表记录</small>
+          </section>
+          <dl class="detail-field-list">
+            <div v-for="item in selectedRecordEntries" :key="item.key">
+              <dt>{{ fieldLabel(item.key) }}</dt>
+              <dd>{{ formatValue(item.value) }}</dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
     </section>
   </main>
 </template>
@@ -280,7 +275,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
-  Wifi
+  X
 } from "lucide-vue-next";
 import FileWorkbench from "./components/FileWorkbench.vue";
 import AiGovernanceWorkbench from "./components/AiGovernanceWorkbench.vue";
@@ -414,10 +409,12 @@ const metricCards = computed<MetricCard[]>(() => answer.value?.metrics ?? [
   { name: "自动化模块", value: String(modules.value.length), trend: "已启用", status: "normal" },
   { name: "人工复核", value: String(reviewTasks.value.length), trend: "待处理", status: reviewTasks.value.length > 0 ? "warning" : "normal" },
   { name: "销售跟进", value: String(followups.value.length), trend: "任务池", status: "normal" },
-  { name: "当前接口", value: String(activeEndpoints.value.length), trend: activeGroup.value, status: "normal" }
+  { name: "业务视图", value: String(activeEndpoints.value.length), trend: activeGroup.value, status: "normal" }
 ]);
-const resultPreview = computed(() => stringify(translateForDisplay(lastResult.value ?? "暂无接口返回")));
-const selectedRecordPreview = computed(() => stringify(translateForDisplay(selectedRecord.value ?? "点击表格行查看详情")));
+const hiddenDetailFields = new Set(["deleted", "storageBucket", "storageKey", "requestHash", "userAgent", "orgId", "ownerUserId"]);
+const selectedRecordEntries = computed(() => Object.entries(selectedRecord.value ?? {})
+  .filter(([key]) => !hiddenDetailFields.has(key))
+  .map(([key, value]) => ({ key, value })));
 const dataStateText = computed(() => dataState.value === "loading" ? "加载中" : dataState.value === "success" ? "已连接" : dataState.value === "error" ? "异常" : "待命");
 
 onMounted(async () => {
@@ -476,10 +473,6 @@ function handleFileJump(target: "contract" | "invoice" | "review" | "workflow", 
   lastResult.value = null;
   notice.value = `已跳转到关联记录 ${id}`;
   selectEndpoint(endpointCatalog.find((item) => item.group === activeGroup.value && item.primary) ?? activeEndpoints.value[0]);
-}
-
-function countEndpoints(group: string) {
-  return endpointCatalog.filter((item) => item.group === group).length;
 }
 
 function selectEndpoint(endpoint?: EndpointSpec) {
@@ -563,7 +556,7 @@ async function executeSelected() {
     const result = await runEndpoint(selectedEndpoint.value, actionPayload.value);
     lastResult.value = result.data;
     records.value = Array.isArray(result.data) ? result.data as DataRecord[] : result.data ? [result.data as DataRecord] : [];
-    selectedRecord.value = records.value[0] ?? null;
+    selectedRecord.value = null;
     notice.value = `${selectedEndpoint.value.title} 执行成功`;
     page.value = 1;
     dataState.value = "success";
@@ -628,6 +621,11 @@ function fieldLabel(key: string) {
     amount: "金额",
     currency: "币种",
     paymentTerms: "付款条款",
+    invoiceTerms: "开票条款",
+    renewalTerms: "续约条款",
+    startDate: "开始日期",
+    endDate: "结束日期",
+    signDate: "签署日期",
     riskLevel: "风险等级",
     reviewStatus: "复核状态",
     invoiceNo: "发票号码",
@@ -670,6 +668,8 @@ function fieldLabel(key: string) {
     reportType: "报表类型",
     summary: "摘要",
     owner: "负责人",
+    ownerUserId: "负责人用户ID",
+    orgId: "所属组织ID",
     code: "编码",
     name: "名称",
     description: "说明"

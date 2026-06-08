@@ -59,6 +59,15 @@ springdoc:
 knife4j:
   enable: true
 
+logging:
+  charset:
+    console: UTF-8
+  level:
+    root: INFO
+    com.qyglai.automation: INFO
+    com.qyglai.automation.mapper: DEBUG
+    org.springframework.security: INFO
+
 automation:
   security:
     jwt-secret: qyglai-local-secret-change-in-production-2026

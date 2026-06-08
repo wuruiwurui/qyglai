@@ -1,261 +1,168 @@
 <template>
   <section class="ai-governance-workbench">
-    <section class="ai-status-grid">
-      <article>
-        <span>真实模型状态</span>
-        <strong :class="status?.enabled ? 'ok' : 'warn'">{{ status?.enabled ? "已启用" : "未启用" }}</strong>
-        <small>{{ status?.enabled ? "请求会尝试调用真实大模型" : "当前使用规则或本地兜底" }}</small>
-      </article>
-      <article>
-        <span>供应商 / 模型</span>
-        <strong>{{ status?.provider ?? "-" }}</strong>
-        <small>{{ status?.model ?? "-" }}</small>
-      </article>
-      <article>
-        <span>最近调用</span>
-        <strong>{{ formatStatus(status?.lastCallStatus) }}</strong>
-        <small>{{ status?.lastFallbackReason ?? "暂无降级原因" }}</small>
-      </article>
-      <article>
-        <span>文件抽取模式</span>
-        <strong>{{ formatMode(status?.fileExtractionMode) }}</strong>
-        <small>合同风险：{{ formatMode(status?.contractRiskMode) }}</small>
-      </article>
+    <section class="ai-current-banner">
+      <div class="ai-current-icon"><Cpu :size="22" /></div>
+      <div>
+        <span>当前调用模型</span>
+        <h2>{{ currentProfile?.name ?? "未配置真实模型" }}</h2>
+        <p>{{ currentProfile ? `${providerLabel(currentProfile.provider)} · ${currentProfile.model}` : "请新增并切换一个可用模型" }}</p>
+      </div>
+      <div class="ai-current-meta">
+        <span :class="status?.lastCallStatus === 'success' ? 'ok' : 'warn'">{{ formatStatus(status?.lastCallStatus) }}</span>
+        <small>{{ status?.lastFallbackReason ?? "切换后下一次调用立即生效" }}</small>
+      </div>
     </section>
 
-    <section class="ai-main-grid">
+    <section class="ai-model-layout">
+      <aside class="ai-profile-panel">
+        <header class="file-section-head">
+          <div><p>模型配置</p><h2>可用模型</h2></div>
+          <button class="primary-button" type="button" @click="startCreate"><Plus :size="15" />新增</button>
+        </header>
+        <div class="ai-profile-list">
+          <button
+            v-for="profile in profiles"
+            :key="profile.id"
+            type="button"
+            :class="{ active: profile.id === config.id, current: profile.current }"
+            @click="editProfile(profile)"
+          >
+            <span class="ai-provider-mark"><Cpu :size="16" /></span>
+            <span>
+              <strong>{{ profile.name }}</strong>
+              <small>{{ providerLabel(profile.provider) }} · {{ profile.model }}</small>
+            </span>
+            <em v-if="profile.current">当前</em>
+            <em v-else-if="!profile.enabled" class="disabled">停用</em>
+          </button>
+          <div v-if="!profiles.length" class="file-empty">暂无模型配置</div>
+        </div>
+      </aside>
+
       <section class="ai-config-panel">
         <div class="file-section-head">
           <div>
-            <p>模型配置</p>
-            <h2>页面维护真实 AI 接入参数</h2>
+            <p>{{ config.id ? "编辑模型" : "新增模型" }}</p>
+            <h2>{{ config.name || "真实模型配置" }}</h2>
           </div>
-          <button class="ghost-button" type="button" @click="loadAll">
-            <RefreshCw :size="15" />
-            刷新
-          </button>
+          <div class="ai-form-actions">
+            <button v-if="config.id && !config.current && config.enabled" class="switch-model-button" type="button" :disabled="state === 'loading'" @click="switchCurrent">
+              <CheckCircle2 :size="15" />设为当前模型
+            </button>
+            <button v-if="config.id && !config.current" class="danger-icon-button" type="button" title="删除模型" :disabled="state === 'loading'" @click="removeCurrent">
+              <Trash2 :size="16" />
+            </button>
+          </div>
         </div>
 
         <form class="ai-config-form" @submit.prevent="submitConfig">
-          <label>
-            <span>供应商</span>
-            <select v-model="config.provider">
-              <option value="doubao">豆包</option>
-              <option value="openai">OpenAI兼容</option>
-              <option value="local">本地模型</option>
-              <option value="mock">模拟模型</option>
-            </select>
-          </label>
-          <label>
-            <span>API地址</span>
-            <input v-model="config.apiBase" placeholder="https://ark.cn-beijing.volces.com/api/v3" />
-          </label>
-          <label>
-            <span>模型 / Endpoint ID</span>
-            <input v-model="config.model" placeholder="ep-xxxxxxxx" />
-          </label>
-          <label>
-            <span>API Key</span>
-            <input v-model="config.apiKey" autocomplete="off" placeholder="留空则保留原密钥" />
-            <small>当前密钥：{{ config.apiKeyMasked ?? "未配置" }}</small>
-          </label>
-
-          <div class="ai-switch-row">
-            <label>
-              <input v-model="config.enabled" type="checkbox" />
-              <span>启用真实模型</span>
-            </label>
-            <label>
-              <input v-model="config.textGenerationEnabled" type="checkbox" />
-              <span>文本生成走真实模型</span>
-            </label>
+          <label><span>配置名称</span><input v-model="config.name" required placeholder="例如：豆包生产模型" /></label>
+          <label><span>供应商</span><select v-model="config.provider"><option value="doubao">豆包</option><option value="openai">OpenAI兼容</option><option value="local">本地模型</option><option value="mock">模拟模型</option></select></label>
+          <label class="wide"><span>API地址</span><input v-model="config.apiBase" required placeholder="https://ark.cn-beijing.volces.com/api/v3" /></label>
+          <label><span>模型 / Endpoint ID</span><input v-model="config.model" required placeholder="ep-xxxxxxxx" /></label>
+          <label><span>API Key</span><input v-model="config.apiKey" autocomplete="off" placeholder="编辑时留空保留原密钥" /><small>当前密钥：{{ config.apiKeyMasked ?? "未配置" }}</small></label>
+          <div class="ai-switch-row wide">
+            <label><input v-model="config.enabled" type="checkbox" /><span>启用该模型</span></label>
+            <label><input v-model="config.textGenerationEnabled" type="checkbox" /><span>文本生成调用真实模型</span></label>
           </div>
-
-          <label>
-            <span>文件抽取模式</span>
-            <select v-model="config.fileExtractionMode">
-              <option value="rules_first">规则优先</option>
-              <option value="model_first">模型优先</option>
-              <option value="rules_only">仅规则</option>
-            </select>
-          </label>
-          <label>
-            <span>合同风险模式</span>
-            <select v-model="config.contractRiskMode">
-              <option value="rules_first">规则优先</option>
-              <option value="model_first">模型优先</option>
-              <option value="rules_only">仅规则</option>
-            </select>
-          </label>
-          <label class="wide">
-            <span>备注</span>
-            <textarea v-model="config.remark" rows="3" />
-          </label>
-
-          <button class="submit-action" type="submit" :disabled="state === 'loading'">
-            <Loader2 v-if="state === 'loading'" class="spin" :size="16" />
-            <Save v-else :size="16" />
-            保存配置
-          </button>
+          <label><span>文件抽取模式</span><select v-model="config.fileExtractionMode"><option value="rules_first">规则优先</option><option value="model_first">模型优先</option><option value="rules_only">仅规则</option></select></label>
+          <label><span>合同风险模式</span><select v-model="config.contractRiskMode"><option value="rules_first">规则优先</option><option value="model_first">模型优先</option><option value="rules_only">仅规则</option></select></label>
+          <label class="wide"><span>备注</span><textarea v-model="config.remark" rows="3" /></label>
+          <button class="primary-button" type="submit" :disabled="state === 'loading'"><Loader2 v-if="state === 'loading'" class="spin" :size="16" /><Save v-else :size="16" />保存模型</button>
         </form>
         <p class="ai-notice" :class="state">{{ notice }}</p>
       </section>
+    </section>
 
-      <section class="ai-log-panel">
-        <div class="file-section-head">
-          <div>
-            <p>调用观测</p>
-            <h2>模型调用日志</h2>
-          </div>
-          <span class="status-chip">{{ logs.length }} 条</span>
-        </div>
-
-        <div class="ai-log-table">
-          <table>
-            <thead>
-              <tr>
-                <th>业务场景</th>
-                <th>业务类型</th>
-                <th>模型</th>
-                <th>接口</th>
-                <th>耗时</th>
-                <th>结果</th>
-                <th>时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="log in logs.slice(0, 15)" :key="log.id">
-                <td>{{ scenarioLabel(log.scenario) }}</td>
-                <td>{{ businessTypeLabel(log.businessType) }}</td>
-                <td>{{ log.modelName ?? "-" }}</td>
-                <td>{{ log.promptTemplateCode ?? "-" }}</td>
-                <td>{{ log.latencyMs ?? 0 }}ms</td>
-                <td>
-                  <span class="result-chip" :class="log.successFlag === 1 ? 'ok' : 'bad'">
-                    {{ log.successFlag === 1 ? "成功" : "失败" }}
-                  </span>
-                </td>
-                <td>{{ formatTime(log.createdAt) }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-if="!logs.length" class="file-empty">暂无调用日志</div>
-        </div>
-      </section>
+    <section class="ai-log-panel">
+      <div class="file-section-head">
+        <div><p>调用观测</p><h2>模型调用日志</h2></div>
+        <span class="status-chip">{{ logs.length }} 条</span>
+      </div>
+      <div class="ai-log-table">
+        <table>
+          <thead><tr><th>业务场景</th><th>业务类型</th><th>调用模型</th><th>耗时</th><th>结果</th><th>时间</th></tr></thead>
+          <tbody>
+            <tr v-for="log in logs.slice(0, 15)" :key="log.id">
+              <td>{{ scenarioLabel(log.scenario) }}</td><td>{{ businessTypeLabel(log.businessType) }}</td>
+              <td>{{ log.modelName ?? "-" }}</td><td>{{ log.latencyMs ?? 0 }}ms</td>
+              <td><span class="result-chip" :class="log.successFlag === 1 ? 'ok' : 'bad'">{{ log.successFlag === 1 ? "成功" : "失败" }}</span></td>
+              <td>{{ formatTime(log.createdAt) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!logs.length" class="file-empty">暂无调用日志</div>
+      </div>
     </section>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { Loader2, RefreshCw, Save } from "lucide-vue-next";
+import { computed, onMounted, ref } from "vue";
+import { CheckCircle2, Cpu, Loader2, Plus, Save, Trash2 } from "lucide-vue-next";
 import {
-  fetchAiModelCallLogs,
-  fetchAiRuntimeConfig,
-  fetchAiRuntimeStatus,
-  saveAiRuntimeConfig,
-  type AiModelCallLog,
-  type AiRuntimeConfig,
-  type AiRuntimeStatus
+  deleteAiModelProfile, fetchAiModelCallLogs, fetchAiModelProfiles, fetchAiRuntimeStatus,
+  saveAiModelProfile, switchAiModelProfile, type AiModelCallLog, type AiModelProfile, type AiRuntimeStatus
 } from "../services/api";
 
 type LoadState = "idle" | "loading" | "success" | "error";
-
 const status = ref<AiRuntimeStatus | null>(null);
+const profiles = ref<AiModelProfile[]>([]);
 const logs = ref<AiModelCallLog[]>([]);
 const state = ref<LoadState>("idle");
-const notice = ref("配置保存后会立即影响 Java AI 模型网关运行策略");
-
-// 表单对象保持完整字段，避免保存时覆盖掉服务端已有运行策略。
-const config = ref<AiRuntimeConfig>({
-  provider: "doubao",
-  apiBase: "https://ark.cn-beijing.volces.com/api/v3",
-  apiKey: "",
-  model: "",
-  enabled: false,
-  textGenerationEnabled: true,
-  fileExtractionMode: "rules_first",
-  contractRiskMode: "rules_first",
-  remark: ""
+const notice = ref("模型切换后，下一次真实模型调用立即生效");
+const emptyProfile = (): AiModelProfile => ({
+  name: "", provider: "doubao", apiBase: "https://ark.cn-beijing.volces.com/api/v3", apiKey: "", model: "",
+  enabled: true, textGenerationEnabled: true, fileExtractionMode: "rules_first", contractRiskMode: "rules_first", remark: ""
 });
+const config = ref<AiModelProfile>(emptyProfile());
+const currentProfile = computed(() => profiles.value.find((item) => item.current));
 
 onMounted(loadAll);
 
 async function loadAll() {
   state.value = "loading";
   try {
-    const [runtimeStatus, runtimeConfig, callLogs] = await Promise.all([
-      fetchAiRuntimeStatus(),
-      fetchAiRuntimeConfig(),
-      fetchAiModelCallLogs()
-    ]);
-    status.value = runtimeStatus;
-    config.value = { ...runtimeConfig, apiKey: "" };
-    logs.value = callLogs;
-    notice.value = "已刷新 AI 运行状态";
+    [profiles.value, status.value, logs.value] = await Promise.all([fetchAiModelProfiles(), fetchAiRuntimeStatus(), fetchAiModelCallLogs()]);
+    const selected = profiles.value.find((item) => item.id === config.value.id) ?? currentProfile.value ?? profiles.value[0];
+    config.value = selected ? { ...selected, apiKey: "" } : emptyProfile();
+    notice.value = "已加载模型配置";
     state.value = "success";
-  } catch (error) {
-    notice.value = error instanceof Error ? error.message : "AI治理数据加载失败";
-    state.value = "error";
-  }
+  } catch (error) { fail(error, "模型配置加载失败"); }
 }
+
+function startCreate() { config.value = emptyProfile(); notice.value = "填写新模型连接信息"; }
+function editProfile(profile: AiModelProfile) { config.value = { ...profile, apiKey: "" }; notice.value = profile.current ? "当前调用模型" : "可编辑或切换此模型"; }
 
 async function submitConfig() {
   state.value = "loading";
   try {
-    const saved = await saveAiRuntimeConfig(config.value);
+    const { current: _current, apiKeyMasked: _apiKeyMasked, ...payload } = config.value;
+    const saved = await saveAiModelProfile(payload);
+    notice.value = "模型配置已保存";
     config.value = { ...saved, apiKey: "" };
-    status.value = await fetchAiRuntimeStatus();
-    notice.value = "AI 配置已保存";
-    state.value = "success";
-  } catch (error) {
-    notice.value = error instanceof Error ? error.message : "AI配置保存失败";
-    state.value = "error";
-  }
+    await loadAll();
+  } catch (error) { fail(error, "模型配置保存失败"); }
 }
 
-function formatMode(value?: string) {
-  return ({
-    rules_first: "规则优先",
-    model_first: "模型优先",
-    rules_only: "仅规则"
-  } as Record<string, string>)[value ?? ""] ?? value ?? "-";
+async function switchCurrent() {
+  if (!config.value.id) return;
+  state.value = "loading";
+  try { await switchAiModelProfile(config.value.id); notice.value = `已切换到 ${config.value.name}`; await loadAll(); }
+  catch (error) { fail(error, "模型切换失败"); }
 }
 
-function formatStatus(value?: string) {
-  return ({
-    not_called: "尚未调用",
-    success: "成功",
-    fallback: "已降级",
-    failed: "失败"
-  } as Record<string, string>)[value ?? ""] ?? value ?? "-";
+async function removeCurrent() {
+  if (!config.value.id) return;
+  state.value = "loading";
+  try { await deleteAiModelProfile(config.value.id); config.value = emptyProfile(); notice.value = "模型配置已删除"; await loadAll(); }
+  catch (error) { fail(error, "模型删除失败"); }
 }
 
-function scenarioLabel(value?: string | null) {
-  return ({
-    boss_query: "老板问答",
-    file_parse_extract: "文件解析抽取",
-    knowledge_query: "知识问答"
-  } as Record<string, string>)[value ?? ""] ?? value ?? "-";
-}
-
-function businessTypeLabel(value?: string | null) {
-  return ({
-    report: "报表",
-    file: "文件",
-    contract: "合同",
-    invoice: "发票",
-    ticket: "客服工单"
-    ,
-    company: "全公司知识库",
-    legal: "法务知识库",
-    finance: "财务知识库",
-    sales: "销售知识库"
-  } as Record<string, string>)[value ?? ""] ?? value ?? "-";
-}
-
-function formatTime(value?: string | null) {
-  if (!value) return "-";
-  return value.replace("T", " ").slice(0, 19);
-}
+function fail(error: unknown, fallback: string) { notice.value = error instanceof Error ? error.message : fallback; state.value = "error"; }
+function providerLabel(value?: string) { return ({ doubao: "豆包", openai: "OpenAI兼容", local: "本地模型", mock: "模拟模型" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
+function formatStatus(value?: string) { return ({ not_called: "尚未调用", success: "最近调用成功", fallback: "当前已降级", failed: "调用失败" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
+function scenarioLabel(value?: string | null) { return ({ boss_query: "老板问答", file_parse_extract: "文件解析抽取", knowledge_query: "知识问答" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
+function businessTypeLabel(value?: string | null) { return ({ report: "报表", file: "文件", contract: "合同", invoice: "发票", ticket: "客服工单", company: "全公司知识库", legal: "法务知识库", finance: "财务知识库", sales: "销售知识库" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
+function formatTime(value?: string | null) { return value ? value.replace("T", " ").slice(0, 19) : "-"; }
 </script>

@@ -1,0 +1,28 @@
+{
+  "currentProfileId" : "e2740a47-781c-4926-96ef-fe3e17b8eeb2",
+  "profiles" : [ {
+    "id" : "bcf92923-ac79-4c74-bfad-2324a67a0c41",
+    "name" : "doubao / ep-20260605102340-bwv2d",
+    "provider" : "doubao",
+    "apiBase" : "https://ark.cn-beijing.volces.com/api/v3",
+    "apiKey" : "ark-66422716-ffd0-4c5b-b354-3962526e57de-bf9d9",
+    "model" : "ep-20260605102340-bwv2d",
+    "enabled" : true,
+    "textGenerationEnabled" : true,
+    "fileExtractionMode" : "model_first",
+    "contractRiskMode" : "model_first",
+    "remark" : "Java AI模型网关配置"
+  }, {
+    "id" : "e2740a47-781c-4926-96ef-fe3e17b8eeb2",
+    "name" : "??????",
+    "provider" : "openai",
+    "apiBase" : "https://example.com/v1",
+    "apiKey" : "verify-key",
+    "model" : "verify-model",
+    "enabled" : true,
+    "textGenerationEnabled" : true,
+    "fileExtractionMode" : "rules_first",
+    "contractRiskMode" : "rules_first",
+    "remark" : "????"
+  } ]
+}

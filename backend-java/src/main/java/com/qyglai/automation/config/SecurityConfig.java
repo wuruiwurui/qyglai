@@ -1,6 +1,7 @@
 package com.qyglai.automation.config;
 
 import com.qyglai.automation.security.JwtAuthenticationFilter;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -23,8 +24,22 @@ import static org.springframework.security.authorization.AuthorizationManagers.a
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    /**
+     * 访问日志过滤器仅由 Spring Security 调用，确保日志能够读取认证后的用户信息。
+     */
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationFilter jwtAuthenticationFilter) throws Exception {
+    public FilterRegistrationBean<RequestAccessLogFilter> disableAccessLogFilterAutoRegistration(
+            RequestAccessLogFilter requestAccessLogFilter) {
+        FilterRegistrationBean<RequestAccessLogFilter> registration = new FilterRegistrationBean<>(requestAccessLogFilter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            JwtAuthenticationFilter jwtAuthenticationFilter,
+            RequestAccessLogFilter requestAccessLogFilter) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> {})
@@ -47,6 +62,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/audit/**").access(anyOf(hasAuthority("*"), hasAuthority("audit:view")))
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(requestAccessLogFilter, JwtAuthenticationFilter.class)
                 .build();
     }
 

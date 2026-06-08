@@ -84,22 +84,78 @@
     </section>
 
     <section v-if="tab === 'definitions'" class="workflow-form-band">
-      <div class="file-section-head"><div><p>流程设计</p><h2>发布新的流程版本</h2></div><span class="status-chip">{{ notice }}</span></div>
-      <form class="workflow-start-form" @submit.prevent="submitDefinition">
-        <label><span>流程编码</span><input v-model="definitionForm.workflowCode" required /></label>
-        <label><span>流程名称</span><input v-model="definitionForm.workflowName" required /></label>
-        <label><span>业务场景</span><input v-model="definitionForm.scenario" required /></label>
-        <label><span>状态</span><select v-model="definitionForm.status"><option value="enabled">启用</option><option value="disabled">停用</option></select></label>
-        <label class="wide"><span>节点定义 JSON</span><textarea v-model="definitionForm.definitionJson" rows="8" required /></label>
-        <button class="submit-action" type="submit"><Save :size="16" />发布新版本</button>
-      </form>
+      <div class="file-section-head">
+        <div><p>流程设计</p><h2>拖拽式审批流程设计器</h2></div>
+        <div class="workflow-designer-head-actions">
+          <select v-model="selectedDefinitionId" @change="loadSelectedDefinition">
+            <option value="">新建流程</option>
+            <option v-for="item in definitions" :key="item.id" :value="item.id">{{ item.workflowName }} · V{{ item.versionNo }}</option>
+          </select>
+          <button class="primary-button" type="button" @click="submitDefinition"><Save :size="16" />发布新版本</button>
+        </div>
+      </div>
+
+      <section class="workflow-designer">
+        <aside class="workflow-palette">
+          <div><strong>节点组件</strong><small>拖入画布或点击添加</small></div>
+          <button v-for="item in nodeTemplates" :key="item.type" type="button" draggable="true" @dragstart="startPaletteDrag(item.type, $event)" @dragend="resetDrag" @click="addNode(item.type)">
+            <span :class="`workflow-palette-icon ${item.type}`"><component :is="item.icon" :size="16" /></span>
+            <span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
+          </button>
+        </aside>
+
+        <section class="workflow-canvas" @dragover.prevent @drop="dropOnCanvas">
+          <div class="workflow-canvas-meta">
+            <label><span>流程编码</span><input v-model="definitionForm.workflowCode" required /></label>
+            <label><span>流程名称</span><input v-model="definitionForm.workflowName" required /></label>
+            <label><span>业务场景</span><input v-model="definitionForm.scenario" required /></label>
+            <label><span>状态</span><select v-model="definitionForm.status"><option value="enabled">启用</option><option value="disabled">停用</option></select></label>
+          </div>
+          <div class="workflow-start-node"><Play :size="15" /><span>流程开始</span></div>
+          <div v-if="!designerNodes.length" class="workflow-canvas-empty">
+            <Route :size="27" /><strong>把审批节点拖到这里</strong><span>节点顺序就是实际审批流转顺序</span>
+          </div>
+          <div class="workflow-node-flow">
+            <article
+              v-for="(node, index) in designerNodes"
+              :key="node.uid"
+              draggable="true"
+              :class="{ active: selectedNodeUid === node.uid, dragging: draggedNodeIndex === index }"
+              @dragstart="startNodeDrag(index, $event)"
+              @dragend="resetDrag"
+              @dragover.prevent
+              @drop.stop="dropBeforeNode(index)"
+              @click="selectedNodeUid = node.uid"
+            >
+              <span class="workflow-drag-handle"><GripVertical :size="17" /></span>
+              <span :class="`workflow-palette-icon ${node.type}`"><component :is="nodeIcon(node.type)" :size="16" /></span>
+              <span class="workflow-node-copy"><strong>{{ node.name }}</strong><small>{{ node.code }} · {{ node.dueHours }} 小时</small></span>
+              <button type="button" title="删除节点" @click.stop="removeNode(node.uid)"><Trash2 :size="15" /></button>
+            </article>
+          </div>
+          <div class="workflow-end-node"><CheckCircle2 :size="15" /><span>流程结束</span></div>
+        </section>
+
+        <aside class="workflow-node-properties">
+          <template v-if="selectedDesignerNode">
+            <div><strong>节点属性</strong><small>修改后自动同步流程定义</small></div>
+            <label><span>节点名称</span><input v-model="selectedDesignerNode.name" /></label>
+            <label><span>节点编码</span><input v-model="selectedDesignerNode.code" /></label>
+            <label><span>处理时限（小时）</span><input v-model.number="selectedDesignerNode.dueHours" type="number" min="1" /></label>
+            <label><span>指定审批人用户ID</span><input v-model="selectedDesignerNode.assigneeUserId" placeholder="留空则按默认规则分配" /></label>
+            <button class="danger-text-button" type="button" @click="removeNode(selectedDesignerNode.uid)"><Trash2 :size="15" />删除节点</button>
+          </template>
+          <div v-else class="workflow-property-empty"><Settings2 :size="24" /><strong>选择节点编辑属性</strong></div>
+        </aside>
+      </section>
+      <p class="workflow-designer-notice">{{ notice }}</p>
     </section>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref, type PropType } from "vue";
-import { CheckCircle2, ClipboardCheck, Forward, History, PlusCircle, RefreshCw, Route, Save, Send, Settings2, XCircle } from "lucide-vue-next";
+import { computed, defineComponent, h, onMounted, ref, type Component, type PropType } from "vue";
+import { Bot, CheckCircle2, ClipboardCheck, Forward, GripVertical, History, Landmark, Play, PlusCircle, RefreshCw, Route, Save, Send, Settings2, ShieldCheck, Trash2, UserRoundCheck, XCircle } from "lucide-vue-next";
 import {
   fetchWorkflowDefinitions, fetchWorkflowDetail, fetchWorkflowInstances, fetchWorkflowTasks, handleWorkflowTask,
   saveWorkflowDefinition, startWorkflowApproval, type WorkflowDefinition, type WorkflowInstance,
@@ -135,8 +191,21 @@ const notice = ref("工作流已就绪");
 const startForm = ref({ workflowCode: "", businessType: "contract", businessId: "", title: "" });
 const definitionForm = ref({
   workflowCode: "custom_approval", workflowName: "自定义审批流程", scenario: "custom", status: "enabled",
-  definitionJson: '{\n  "nodes": [\n    {"code":"department_review","name":"部门负责人审批","dueHours":24},\n    {"code":"final_review","name":"最终审批","dueHours":48}\n  ]\n}'
+  definitionJson: ""
 });
+type DesignerNode = { uid: string; type: string; code: string; name: string; dueHours: number; assigneeUserId?: string };
+const nodeTemplates: { type: string; label: string; description: string; icon: Component }[] = [
+  { type: "approval", label: "人工审批", description: "通用审批节点", icon: UserRoundCheck },
+  { type: "department", label: "部门审批", description: "部门负责人处理", icon: ShieldCheck },
+  { type: "finance", label: "财务审批", description: "财务人员处理", icon: Landmark },
+  { type: "ai", label: "AI 复核", description: "AI辅助检查节点", icon: Bot }
+];
+const designerNodes = ref<DesignerNode[]>([]);
+const selectedNodeUid = ref("");
+const selectedDefinitionId = ref("");
+const draggedNodeIndex = ref<number | null>(null);
+const draggedTemplateType = ref("");
+const selectedDesignerNode = computed(() => designerNodes.value.find((node) => node.uid === selectedNodeUid.value));
 
 const enabledDefinitions = computed(() => definitions.value.filter((item) => item.status === "enabled"));
 const runningCount = computed(() => instances.value.filter((item) => item.status === "running").length);
@@ -196,12 +265,120 @@ async function submitStart() {
 
 async function submitDefinition() {
   try {
+    if (!designerNodes.value.length) throw new Error("流程至少需要一个审批节点");
+    const codes = designerNodes.value.map((node) => node.code.trim());
+    if (codes.some((code) => !code)) throw new Error("节点编码不能为空");
+    if (new Set(codes).size !== codes.length) throw new Error("节点编码不能重复");
+    definitionForm.value.definitionJson = JSON.stringify({
+      nodes: designerNodes.value.map((node) => ({
+        code: node.code.trim(), name: node.name.trim() || node.code.trim(), dueHours: Math.max(1, Number(node.dueHours) || 24),
+        ...(node.assigneeUserId ? { assigneeUserId: Number(node.assigneeUserId) } : {})
+      }))
+    });
     await saveWorkflowDefinition(definitionForm.value);
     notice.value = "流程新版本已发布";
     await loadAll();
   } catch (error) {
     notice.value = errorMessage(error);
   }
+}
+
+function uid() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function addNode(type: string, index = designerNodes.value.length) {
+  const template = nodeTemplates.find((item) => item.type === type) ?? nodeTemplates[0];
+  const sequence = designerNodes.value.length + 1;
+  const node: DesignerNode = {
+    uid: uid(), type: template.type, code: `${template.type}_review_${sequence}`, name: template.label, dueHours: 24
+  };
+  designerNodes.value.splice(index, 0, node);
+  selectedNodeUid.value = node.uid;
+}
+
+function startPaletteDrag(type: string, event: DragEvent) {
+  draggedTemplateType.value = type;
+  draggedNodeIndex.value = null;
+  event.dataTransfer?.setData("text/plain", `workflow-template:${type}`);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
+}
+
+function startNodeDrag(index: number, event: DragEvent) {
+  draggedNodeIndex.value = index;
+  draggedTemplateType.value = "";
+  event.dataTransfer?.setData("text/plain", `workflow-node:${index}`);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
+function dropOnCanvas() {
+  if (draggedTemplateType.value) addNode(draggedTemplateType.value);
+  else if (draggedNodeIndex.value !== null) moveNode(draggedNodeIndex.value, designerNodes.value.length);
+  resetDrag();
+}
+
+function dropBeforeNode(index: number) {
+  if (draggedTemplateType.value) addNode(draggedTemplateType.value, index);
+  else if (draggedNodeIndex.value !== null) moveNode(draggedNodeIndex.value, index);
+  resetDrag();
+}
+
+function moveNode(from: number, to: number) {
+  if (from === to) return;
+  const [node] = designerNodes.value.splice(from, 1);
+  designerNodes.value.splice(from < to ? to - 1 : to, 0, node);
+}
+
+function resetDrag() {
+  draggedNodeIndex.value = null;
+  draggedTemplateType.value = "";
+}
+
+function removeNode(uidValue: string) {
+  designerNodes.value = designerNodes.value.filter((node) => node.uid !== uidValue);
+  if (selectedNodeUid.value === uidValue) selectedNodeUid.value = designerNodes.value[0]?.uid ?? "";
+}
+
+function nodeIcon(type: string) {
+  return nodeTemplates.find((item) => item.type === type)?.icon ?? UserRoundCheck;
+}
+
+function loadSelectedDefinition() {
+  const definition = definitions.value.find((item) => item.id === selectedDefinitionId.value);
+  if (!definition) {
+    definitionForm.value = { workflowCode: "custom_approval", workflowName: "自定义审批流程", scenario: "custom", status: "enabled", definitionJson: "" };
+    designerNodes.value = [];
+    selectedNodeUid.value = "";
+    return;
+  }
+  definitionForm.value = {
+    workflowCode: definition.workflowCode, workflowName: definition.workflowName, scenario: definition.scenario,
+    status: definition.status, definitionJson: definition.definitionJson
+  };
+  try {
+    const parsed = JSON.parse(definition.definitionJson);
+    designerNodes.value = (parsed.nodes ?? []).map((node: string | Record<string, unknown>, index: number) => {
+      if (typeof node === "string") return { uid: uid(), type: "approval", code: node, name: node, dueHours: 24 };
+      const code = String(node.code ?? `approval_${index + 1}`);
+      return {
+        uid: uid(), type: inferNodeType(code), code, name: String(node.name ?? code),
+        dueHours: Number(node.dueHours ?? 24), assigneeUserId: node.assigneeUserId ? String(node.assigneeUserId) : ""
+      };
+    });
+    selectedNodeUid.value = designerNodes.value[0]?.uid ?? "";
+    notice.value = `已载入 ${definition.workflowName}，发布时会创建新版本`;
+  } catch {
+    designerNodes.value = [];
+    selectedNodeUid.value = "";
+    notice.value = "原流程定义无法解析，请重新设计";
+  }
+}
+
+function inferNodeType(code: string) {
+  if (code.toLowerCase().includes("finance")) return "finance";
+  if (code.toLowerCase().includes("department")) return "department";
+  if (code.toLowerCase().includes("ai")) return "ai";
+  return "approval";
 }
 
 function definitionName(id: string) {

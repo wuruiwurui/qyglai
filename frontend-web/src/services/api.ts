@@ -364,6 +364,15 @@ export type AiRuntimeConfig = {
   remark?: string | null;
 };
 
+export type AiModelProfile = AiRuntimeConfig & {
+  /** 配置唯一标识。 */
+  id?: string;
+  /** 页面展示名称。 */
+  name: string;
+  /** 是否为当前使用模型。 */
+  current?: boolean;
+};
+
 export type AiModelCallLog = {
   id: string;
   providerId?: string | null;
@@ -638,6 +647,25 @@ export async function saveAiRuntimeConfig(config: AiRuntimeConfig): Promise<AiRu
     method: "POST",
     body: JSON.stringify(config)
   });
+}
+
+export function fetchAiModelProfiles(): Promise<AiModelProfile[]> {
+  return request<AiModelProfile[]>("/api/ai-governance/model-profiles");
+}
+
+export function saveAiModelProfile(profile: AiModelProfile): Promise<AiModelProfile> {
+  return request<AiModelProfile>("/api/ai-governance/model-profiles", {
+    method: "POST",
+    body: JSON.stringify(profile)
+  });
+}
+
+export function switchAiModelProfile(id: string): Promise<AiModelProfile> {
+  return request<AiModelProfile>(`/api/ai-governance/model-profiles/${id}/switch`, { method: "POST" });
+}
+
+export function deleteAiModelProfile(id: string): Promise<void> {
+  return request<void>(`/api/ai-governance/model-profiles/${id}`, { method: "DELETE" });
 }
 
 export function fetchAiModelCallLogs(): Promise<AiModelCallLog[]> {

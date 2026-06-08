@@ -7,6 +7,8 @@ import com.qyglai.automation.dto.SimpleCreateRequest;
 import com.qyglai.automation.dto.AiRuntimeConfig;
 import com.qyglai.automation.dto.AiRuntimeConfigView;
 import com.qyglai.automation.dto.AiRuntimeStatus;
+import com.qyglai.automation.dto.AiModelProfile;
+import com.qyglai.automation.dto.AiModelProfileView;
 import com.qyglai.automation.entity.AiEvaluationSampleEntity;
 import com.qyglai.automation.entity.AiModelCallLogEntity;
 import com.qyglai.automation.entity.AiModelProviderEntity;
@@ -20,6 +22,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -56,6 +60,39 @@ public class AiGovernanceController {
     @GetMapping("/runtime-status")
     public ApiResponse<AiRuntimeStatus> runtimeStatus() {
         return ApiResponse.ok(modelGateway.status());
+    }
+
+    /**
+     * 查询全部可切换模型配置。
+     */
+    @GetMapping("/model-profiles")
+    public ApiResponse<List<AiModelProfileView>> modelProfiles() {
+        return ApiResponse.ok(modelConfigService.listProfiles());
+    }
+
+    /**
+     * 新增或更新模型配置。
+     */
+    @PostMapping("/model-profiles")
+    public ApiResponse<AiModelProfileView> saveModelProfile(@RequestBody AiModelProfile request) {
+        return ApiResponse.ok(modelConfigService.saveProfile(request));
+    }
+
+    /**
+     * 切换当前使用模型。
+     */
+    @PostMapping("/model-profiles/{id}/switch")
+    public ApiResponse<AiModelProfileView> switchModelProfile(@PathVariable String id) {
+        return ApiResponse.ok(modelConfigService.switchCurrent(id));
+    }
+
+    /**
+     * 删除非当前模型配置。
+     */
+    @DeleteMapping("/model-profiles/{id}")
+    public ApiResponse<Void> deleteModelProfile(@PathVariable String id) {
+        modelConfigService.deleteProfile(id);
+        return ApiResponse.ok(null);
     }
 
     /**
