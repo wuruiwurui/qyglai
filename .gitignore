@@ -1,7 +1,6 @@
 .idea/
 .vscode/
 target/
-*.class
 
 __pycache__/
 .pytest_cache/
