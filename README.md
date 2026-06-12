@@ -16,6 +16,38 @@
 | Java 后端 | 8080 | 业务、AI、RAG、权限和工作流接口 |
 | Vue 前端 | 5173 | 企业管理界面，`/api` 代理至 Java 后端 |
 
+## 功能截图
+
+### 老板智能经营助手
+
+通过连续对话查询销售、财务、客服、合同、复核和报表等真实经营数据。
+
+![老板智能经营助手](docs/screenshots/01-dashboard.png)
+
+### 文件 AI 处理闭环
+
+上传合同、发票等文件后，完成文本解析、模型字段抽取、业务入库、人工复核和审批发起。
+
+![文件 AI 处理闭环](docs/screenshots/02-file-processing.png)
+
+### 企业知识库 RAG
+
+提供知识空间、连续问答、文档上传、Java 向量索引和引用来源展示。
+
+![企业知识库 RAG](docs/screenshots/03-knowledge-base.png)
+
+### 可拖拽审批流程
+
+通过拖拽编排人工审批、部门审批、财务审批和可自动执行的 AI 复核节点。
+
+![可拖拽审批流程](docs/screenshots/04-workflow-designer.png)
+
+### 多模型 AI 治理
+
+支持维护多个真实模型、动态切换当前模型，并查看模型运行状态与调用日志。
+
+![多模型 AI 治理](docs/screenshots/05-ai-governance.png)
+
 ## 最近完成功能
 
 ### Java AI 能力迁移
@@ -144,26 +176,42 @@
 - Maven 本地仓库：`D:\kfhj\maven\mavenqiye`
 - MySQL：`localhost:3306/qyglai`
 
-启动 Java 后端：
+### 1. 启动 Java 后端
+
+打开第一个 PowerShell 终端：
 
 ```powershell
-cd backend-java
+cd E:\xm\qyglai\backend-java
 $env:JAVA_HOME='D:\kfhj\jdk\jdk-21.0.11'
 $env:Path="$env:JAVA_HOME\bin;D:\kfhj\maven\apache-maven-3.9.16\bin;$env:Path"
 mvn "-Dmaven.repo.local=D:\kfhj\maven\mavenqiye" spring-boot:run
 ```
 
-启动 Vue 前端：
+后端启动成功后可访问：
+
+- 健康检查：`http://localhost:8080/actuator/health`
+- Swagger API 文档：`http://localhost:8080/swagger-ui/index.html`
+- Knife4j API 文档：`http://localhost:8080/doc.html`
+
+### 2. 启动 Vue 前端
+
+打开第二个 PowerShell 终端：
 
 ```powershell
-cd frontend-web
+cd E:\xm\qyglai\frontend-web
 npm install
 npm run dev
 ```
 
-访问地址：`http://localhost:5173`
+`npm install` 仅在首次运行或依赖发生变化时执行，后续直接运行 `npm run dev`。
 
-默认管理员账号：`admin / 123456`
+### 3. 登录系统
+
+- 前端访问地址：`http://localhost:5173`
+- 默认管理员账号：`admin`
+- 默认管理员密码：`123456`
+
+停止前端或后端服务时，在对应终端按 `Ctrl + C`。
 
 ## 数据与配置
 
