@@ -184,7 +184,7 @@ public class KnowledgeRagService {
         String fallback = "根据知识库资料：" + hits.getFirst().content();
         String requestText = "问题：" + request.question() + "\n\n知识片段：\n" + context;
         long start = System.currentTimeMillis();
-        String answer = modelGateway.generateText(
+        String answer = modelGateway.generateText("knowledge_query",
                 "你是企业知识库助手。只能根据提供的知识片段回答，不得编造。"
                         + "回答中的关键结论必须使用[1]、[2]形式标注来源；资料不足时明确说明。",
                 requestText,

@@ -34,7 +34,7 @@ class WorkflowAiNodeServiceTest {
     @Test
     void shouldAutoApproveOnlyForHighConfidenceRiskFreeModelResult() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
-        when(modelGateway.generateJson(anyString(), anyString())).thenReturn(mapper.readTree("""
+        when(modelGateway.generateJson(anyString(), anyString(), anyString())).thenReturn(mapper.readTree("""
                 {"decision":"auto_pass","confidence":0.93,"summary":"业务数据完整","risks":[]}
                 """));
         when(modelGateway.status()).thenReturn(status("success", null));
@@ -50,7 +50,7 @@ class WorkflowAiNodeServiceTest {
 
     @Test
     void shouldFallbackToManualReviewWhenModelFails() {
-        when(modelGateway.generateJson(anyString(), anyString())).thenReturn(null);
+        when(modelGateway.generateJson(anyString(), anyString(), anyString())).thenReturn(null);
         when(modelGateway.status()).thenReturn(status("fallback", "连接超时"));
 
         WorkflowAiNodeService.AiNodeResult result = service.review(instance(), "ai_review", "AI复核");

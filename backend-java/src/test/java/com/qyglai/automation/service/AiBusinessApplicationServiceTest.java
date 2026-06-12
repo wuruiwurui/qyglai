@@ -27,7 +27,7 @@ class AiBusinessApplicationServiceTest {
 
     @Test
     void shouldUseStructuredModelTicketDecision() throws Exception {
-        when(modelGateway.generateJson(anyString(), anyString())).thenReturn(objectMapper.readTree("""
+        when(modelGateway.generateJson(anyString(), anyString(), anyString())).thenReturn(objectMapper.readTree("""
                 {"category":"交付投诉","priority":"P1","sentiment":"negative","suggestedOwner":"客服主管",
                  "confidence":0.91,"replySuggestion":"立即核实交付节点并反馈。"}
                 """));
@@ -42,7 +42,7 @@ class AiBusinessApplicationServiceTest {
 
     @Test
     void shouldKeepJavaDifferenceAndFallbackWhenModelFails() {
-        when(modelGateway.generateJson(anyString(), anyString())).thenReturn(null);
+        when(modelGateway.generateJson(anyString(), anyString(), anyString())).thenReturn(null);
         when(modelGateway.status()).thenReturn(status("fallback", "timeout"));
 
         AiBusinessApplicationService.ReconciliationDecision result = service.explainReconciliation(

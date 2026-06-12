@@ -74,6 +74,44 @@
       </section>
     </section>
 
+    <section class="ai-routing-panel">
+      <div class="file-section-head">
+        <div><p>调用路由</p><h2>场景模型路由与备用切换</h2></div>
+        <span class="status-chip">{{ routes.length }} 个场景已配置</span>
+      </div>
+      <div class="ai-routing-layout">
+        <form class="ai-route-form" @submit.prevent="submitRoute">
+          <label><span>业务场景</span><select v-model="routeDraft.scenario" @change="loadRouteDraft">
+            <option v-for="item in routeScenarios" :key="item.value" :value="item.value">{{ item.label }}</option>
+          </select></label>
+          <label><span>主模型</span><select v-model="routeDraft.primaryProfileId" required>
+            <option value="" disabled>请选择主模型</option>
+            <option v-for="profile in enabledProfiles" :key="profile.id" :value="profile.id">{{ profile.name }} · {{ profile.model }}</option>
+          </select></label>
+          <fieldset>
+            <legend>备用模型顺序</legend>
+            <label v-for="profile in fallbackProfiles" :key="profile.id">
+              <input :checked="routeDraft.fallbackProfileIds.includes(profile.id ?? '')" type="checkbox" @change="toggleFallback(profile.id ?? '', ($event.target as HTMLInputElement).checked)" />
+              <span>{{ profile.name }} · {{ profile.model }}</span>
+            </label>
+            <small>勾选顺序即故障切换顺序；主模型请求失败或返回无效 JSON 时自动尝试备用模型。</small>
+          </fieldset>
+          <div class="ai-route-actions">
+            <button class="primary-button" type="submit" :disabled="state === 'loading' || !routeDraft.primaryProfileId"><Route :size="16" />保存路由</button>
+            <button v-if="currentRoute" class="ghost-button" type="button" @click="removeRoute"><Trash2 :size="15" />恢复默认模型</button>
+          </div>
+        </form>
+        <div class="ai-route-list">
+          <article v-for="route in routes" :key="route.scenario" :class="{ active: route.scenario === routeDraft.scenario }" @click="selectRoute(route.scenario)">
+            <span><Route :size="16" /></span>
+            <div><strong>{{ scenarioLabel(route.scenario) }}</strong><small>主模型：{{ route.primaryModel }}</small></div>
+            <em>{{ route.fallbackModels?.length ?? 0 }} 个备用</em>
+          </article>
+          <div v-if="!routes.length" class="file-empty">尚未配置场景路由，所有场景使用当前默认模型</div>
+        </div>
+      </div>
+    </section>
+
     <section v-if="evaluation" class="ai-evaluation-center">
       <div class="file-section-head">
         <div><p>效果评估</p><h2>AI 业务效果评估中心</h2></div>
@@ -157,10 +195,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Activity, CheckCircle2, Cpu, Gauge, GitCompare, Loader2, PencilLine, Plus, Save, Trash2 } from "lucide-vue-next";
+import { Activity, CheckCircle2, Cpu, Gauge, GitCompare, Loader2, PencilLine, Plus, Route, Save, Trash2 } from "lucide-vue-next";
 import {
-  deleteAiModelProfile, fetchAiEvaluationDashboard, fetchAiModelCallLogs, fetchAiModelProfiles, fetchAiRuntimeStatus,
-  saveAiModelProfile, switchAiModelProfile, type AiEvaluationDashboard, type AiModelCallLog, type AiModelProfile, type AiRuntimeStatus
+  deleteAiModelProfile, deleteAiScenarioRoute, fetchAiEvaluationDashboard, fetchAiModelCallLogs, fetchAiModelProfiles,
+  fetchAiRuntimeStatus, fetchAiScenarioRoutes, saveAiModelProfile, saveAiScenarioRoute, switchAiModelProfile,
+  type AiEvaluationDashboard, type AiModelCallLog, type AiModelProfile, type AiRuntimeStatus, type AiScenarioRoute
 } from "../services/api";
 
 type LoadState = "idle" | "loading" | "success" | "error";
@@ -169,6 +208,7 @@ const profiles = ref<AiModelProfile[]>([]);
 const logs = ref<AiModelCallLog[]>([]);
 const evaluation = ref<AiEvaluationDashboard | null>(null);
 const evaluationDays = ref(30);
+const routes = ref<AiScenarioRoute[]>([]);
 const state = ref<LoadState>("idle");
 const notice = ref("模型切换后，下一次真实模型调用立即生效");
 const emptyProfile = (): AiModelProfile => ({
@@ -177,17 +217,30 @@ const emptyProfile = (): AiModelProfile => ({
 });
 const config = ref<AiModelProfile>(emptyProfile());
 const currentProfile = computed(() => profiles.value.find((item) => item.current));
+const routeScenarios = [
+  { value: "boss_query", label: "老板问答" }, { value: "file_parse_extract", label: "文件解析抽取" },
+  { value: "document_ocr", label: "图片与扫描件 OCR" }, { value: "knowledge_query", label: "知识问答" },
+  { value: "workflow_ai_review", label: "工作流 AI 复核" }, { value: "ticket_classify", label: "客服分类" },
+  { value: "reconciliation_analysis", label: "对账分析" }, { value: "review_advice", label: "复核建议" },
+  { value: "report_generate", label: "报表生成" }, { value: "sales_followup", label: "销售跟进建议" }
+];
+const routeDraft = ref<AiScenarioRoute>({ scenario: "boss_query", primaryProfileId: "", fallbackProfileIds: [] });
+const enabledProfiles = computed(() => profiles.value.filter((item) => item.enabled && item.id));
+const fallbackProfiles = computed(() => enabledProfiles.value.filter((item) => item.id !== routeDraft.value.primaryProfileId));
+const currentRoute = computed(() => routes.value.find((item) => item.scenario === routeDraft.value.scenario));
 
 onMounted(loadAll);
 
 async function loadAll() {
   state.value = "loading";
   try {
-    [profiles.value, status.value, logs.value, evaluation.value] = await Promise.all([
-      fetchAiModelProfiles(), fetchAiRuntimeStatus(), fetchAiModelCallLogs(), fetchAiEvaluationDashboard(evaluationDays.value)
+    [profiles.value, status.value, logs.value, evaluation.value, routes.value] = await Promise.all([
+      fetchAiModelProfiles(), fetchAiRuntimeStatus(), fetchAiModelCallLogs(), fetchAiEvaluationDashboard(evaluationDays.value),
+      fetchAiScenarioRoutes()
     ]);
     const selected = profiles.value.find((item) => item.id === config.value.id) ?? currentProfile.value ?? profiles.value[0];
     config.value = selected ? { ...selected, apiKey: "" } : emptyProfile();
+    loadRouteDraft();
     notice.value = "已加载模型配置";
     state.value = "success";
   } catch (error) { fail(error, "模型配置加载失败"); }
@@ -226,10 +279,33 @@ async function removeCurrent() {
   catch (error) { fail(error, "模型删除失败"); }
 }
 
+function loadRouteDraft() {
+  const saved = currentRoute.value;
+  routeDraft.value = saved ? { ...saved, fallbackProfileIds: [...saved.fallbackProfileIds] }
+    : { scenario: routeDraft.value.scenario, primaryProfileId: currentProfile.value?.id ?? enabledProfiles.value[0]?.id ?? "", fallbackProfileIds: [] };
+}
+function selectRoute(scenario: string) { routeDraft.value.scenario = scenario; loadRouteDraft(); }
+function toggleFallback(id: string, checked: boolean) {
+  if (!id) return;
+  routeDraft.value.fallbackProfileIds = checked
+    ? [...routeDraft.value.fallbackProfileIds.filter((item) => item !== id), id]
+    : routeDraft.value.fallbackProfileIds.filter((item) => item !== id);
+}
+async function submitRoute() {
+  state.value = "loading";
+  try { await saveAiScenarioRoute(routeDraft.value); notice.value = "场景模型路由已保存"; await loadAll(); }
+  catch (error) { fail(error, "场景模型路由保存失败"); }
+}
+async function removeRoute() {
+  state.value = "loading";
+  try { await deleteAiScenarioRoute(routeDraft.value.scenario); notice.value = "该场景已恢复使用当前默认模型"; await loadAll(); }
+  catch (error) { fail(error, "场景模型路由删除失败"); }
+}
+
 function fail(error: unknown, fallback: string) { notice.value = error instanceof Error ? error.message : fallback; state.value = "error"; }
 function providerLabel(value?: string) { return ({ doubao: "豆包", openai: "OpenAI兼容", local: "本地模型", mock: "模拟模型" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function formatStatus(value?: string) { return ({ not_called: "尚未调用", success: "最近调用成功", fallback: "当前已降级", failed: "调用失败" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
-function scenarioLabel(value?: string | null) { return ({ boss_query: "老板问答", file_parse_extract: "文件解析抽取", document_ocr: "图片与扫描件 OCR", knowledge_query: "知识问答", workflow_ai_review: "工作流 AI 复核", ticket_classify: "客服分类", reconciliation_analysis: "对账分析", review_advice: "复核建议", report_generate: "报表生成" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
+function scenarioLabel(value?: string | null) { return ({ boss_query: "老板问答", file_parse_extract: "文件解析抽取", document_ocr: "图片与扫描件 OCR", knowledge_query: "知识问答", workflow_ai_review: "工作流 AI 复核", ticket_classify: "客服分类", reconciliation_analysis: "对账分析", review_advice: "复核建议", report_generate: "报表生成", sales_followup: "销售跟进建议" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function businessTypeLabel(value?: string | null) { return ({ report: "报表", file: "文件", contract: "合同", invoice: "发票", ticket: "客服工单", company: "全公司知识库", legal: "法务知识库", finance: "财务知识库", sales: "销售知识库" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function formatTime(value?: string | null) { return value ? value.replace("T", " ").slice(0, 19) : "-"; }
 </script>

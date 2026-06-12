@@ -1,20 +1,19 @@
 package com.qyglai.automation.service;
 
-import java.time.Duration;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.qyglai.automation.dto.AiRuntimeConfig;
 import com.qyglai.automation.dto.AiRuntimeStatus;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 /**
- * Java 直接访问豆包或其他 OpenAI 兼容模型的统一网关。
+ * Java 真实模型统一网关，支持按业务场景选择主模型并自动切换备用模型。
  */
 @Service
 public class JavaAiModelGateway {
@@ -23,131 +22,159 @@ public class JavaAiModelGateway {
     private final ObjectMapper objectMapper;
     private volatile String lastCallStatus = "not_called";
     private volatile String lastFallbackReason;
+    private volatile String lastUsedModel;
 
     public JavaAiModelGateway(JavaAiModelConfigService configService, ObjectMapper objectMapper) {
         this.configService = configService;
         this.objectMapper = objectMapper;
     }
 
-    /**
-     * 调用真实模型并解析 JSON 对象。
-     */
+    /** 使用默认路由调用模型并解析 JSON。 */
     public JsonNode generateJson(String systemPrompt, String userPrompt) {
-        String content = generateText(systemPrompt, userPrompt, "");
-        if (content == null || content.isBlank() || !"success".equals(lastCallStatus)) return null;
-        try {
-            String cleaned = content.trim()
-                    .replaceFirst("^```(?:json)?\\s*", "")
-                    .replaceFirst("\\s*```$", "");
-            JsonNode node = objectMapper.readTree(cleaned);
-            if (!node.isObject()) throw new IllegalStateException("模型返回内容不是JSON对象");
-            return node;
-        } catch (Exception ex) {
-            lastCallStatus = "fallback";
-            lastFallbackReason = "模型JSON解析失败: " + ex.getMessage();
-            return null;
-        }
+        return generateJson("default", systemPrompt, userPrompt);
     }
 
     /**
-     * 调用真实模型生成文本，失败时返回业务层提供的数据库摘要。
+     * 按场景路由调用模型并解析 JSON，主模型返回无效 JSON 时继续尝试备用模型。
      */
+    public JsonNode generateJson(String scenario, String systemPrompt, String userPrompt) {
+        List<AiRuntimeConfig> configs = configService.resolveConfigs(scenario);
+        String firstModel = firstModel(configs);
+        String lastError = null;
+        for (AiRuntimeConfig config : configs) {
+            try {
+                String content = callText(config, systemPrompt, userPrompt);
+                String cleaned = content.trim().replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
+                JsonNode node = objectMapper.readTree(cleaned);
+                if (!node.isObject()) throw new IllegalStateException("模型返回内容不是JSON对象");
+                markSuccess(firstModel, config.model());
+                return node;
+            } catch (Exception exception) {
+                lastError = config.model() + ": " + exception.getMessage();
+            }
+        }
+        markFailed(lastError == null ? "场景未配置可用真实模型" : "全部路由模型调用失败: " + lastError);
+        return null;
+    }
+
+    /** 使用默认路由调用文本模型。 */
     public String generateText(String systemPrompt, String userPrompt, String fallback) {
-        AiRuntimeConfig config = configService.getConfig();
-        if (!config.enabled() || !config.textGenerationEnabled() || config.apiKey() == null
-                || config.apiBase() == null || "mock".equalsIgnoreCase(config.provider())) {
-            lastCallStatus = "fallback";
-            lastFallbackReason = "Java真实模型未启用或缺少配置";
-            return fallback;
-        }
-        try {
-            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-            factory.setConnectTimeout(Duration.ofSeconds(15));
-            factory.setReadTimeout(Duration.ofSeconds(75));
-            RestClient client = RestClient.builder()
-                    .baseUrl(config.apiBase().replaceAll("/+$", ""))
-                    .requestFactory(factory)
-                    .defaultHeader("Authorization", "Bearer " + config.apiKey())
-                    .build();
-            JsonNode response = client.post()
-                    .uri("/chat/completions")
-                    .body(Map.of(
-                            "model", config.model(),
-                            "messages", List.of(
-                                    Map.of("role", "system", "content", systemPrompt),
-                                    Map.of("role", "user", "content", userPrompt)
-                            ),
-                            "temperature", 0.2
-                    ))
-                    .retrieve()
-                    .body(JsonNode.class);
-            String content = response == null ? null : response.at("/choices/0/message/content").asText(null);
-            if (content == null || content.isBlank()) throw new IllegalStateException("模型未返回有效文本");
-            lastCallStatus = "success";
-            lastFallbackReason = null;
-            return content;
-        } catch (RuntimeException ex) {
-            lastCallStatus = "fallback";
-            lastFallbackReason = ex.getMessage();
-            return fallback;
-        }
+        return generateText("default", systemPrompt, userPrompt, fallback);
     }
 
     /**
-     * 调用当前多模态模型识别图片文字。
-     *
-     * @param prompt OCR 提示词
-     * @param imageBytes 图片字节
-     * @param mimeType 图片 MIME 类型
-     * @return 模型识别文字
+     * 按场景调用主模型，并在失败时依次切换备用模型。
+     */
+    public String generateText(String scenario, String systemPrompt, String userPrompt, String fallback) {
+        List<AiRuntimeConfig> configs = configService.resolveConfigs(scenario);
+        String firstModel = firstModel(configs);
+        String lastError = null;
+        for (AiRuntimeConfig config : configs) {
+            try {
+                String content = callText(config, systemPrompt, userPrompt);
+                markSuccess(firstModel, config.model());
+                return content;
+            } catch (RuntimeException exception) {
+                lastError = config.model() + ": " + exception.getMessage();
+            }
+        }
+        lastCallStatus = "fallback";
+        lastFallbackReason = lastError == null ? "场景未配置可用真实模型" : "全部路由模型调用失败: " + lastError;
+        return fallback;
+    }
+
+    /**
+     * 使用 OCR 场景路由调用多模态模型识别图片。
      */
     public String generateVisionText(String prompt, byte[] imageBytes, String mimeType) {
-        AiRuntimeConfig config = configService.getConfig();
-        if (!config.enabled() || config.apiKey() == null || config.apiBase() == null
-                || "mock".equalsIgnoreCase(config.provider())) {
-            throw new IllegalStateException("OCR需要启用支持图片理解的真实模型");
+        List<AiRuntimeConfig> configs = configService.resolveConfigs("document_ocr");
+        String firstModel = firstModel(configs);
+        String lastError = null;
+        for (AiRuntimeConfig config : configs) {
+            try {
+                String content = callVision(config, prompt, imageBytes, mimeType);
+                markSuccess(firstModel, config.model());
+                return content;
+            } catch (RuntimeException exception) {
+                lastError = config.model() + ": " + exception.getMessage();
+            }
         }
-        try {
-            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-            factory.setConnectTimeout(Duration.ofSeconds(15));
-            factory.setReadTimeout(Duration.ofSeconds(120));
-            RestClient client = RestClient.builder()
-                    .baseUrl(config.apiBase().replaceAll("/+$", ""))
-                    .requestFactory(factory)
-                    .defaultHeader("Authorization", "Bearer " + config.apiKey())
-                    .build();
-            String dataUrl = "data:" + mimeType + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
-            JsonNode response = client.post()
-                    .uri("/chat/completions")
-                    .body(Map.of(
-                            "model", config.model(),
-                            "messages", List.of(Map.of(
-                                    "role", "user",
-                                    "content", List.of(
-                                            Map.of("type", "text", "text", prompt),
-                                            Map.of("type", "image_url", "image_url", Map.of("url", dataUrl))
-                                    )
-                            )),
-                            "temperature", 0
-                    ))
-                    .retrieve()
-                    .body(JsonNode.class);
-            String content = response == null ? null : response.at("/choices/0/message/content").asText(null);
-            if (content == null || content.isBlank()) throw new IllegalStateException("多模态模型未返回OCR文字");
-            lastCallStatus = "success";
-            lastFallbackReason = null;
-            return content.strip();
-        } catch (RuntimeException ex) {
-            lastCallStatus = "failed";
-            lastFallbackReason = "OCR模型调用失败: " + ex.getMessage();
-            throw new IllegalStateException(lastFallbackReason, ex);
+        markFailed(lastError == null ? "OCR场景未配置可用多模态模型" : "全部OCR路由模型调用失败: " + lastError);
+        throw new IllegalStateException(lastFallbackReason);
+    }
+
+    /**
+     * 查询最近一次模型路由执行状态。
+     */
+    public AiRuntimeStatus status() {
+        AiRuntimeConfig config = configService.getConfig();
+        return new AiRuntimeStatus(config.provider(), lastUsedModel == null ? config.model() : lastUsedModel,
+                config.enabled(), config.apiBase(), config.textGenerationEnabled(), config.fileExtractionMode(),
+                config.contractRiskMode(), lastCallStatus, lastFallbackReason);
+    }
+
+    private String callText(AiRuntimeConfig config, String systemPrompt, String userPrompt) {
+        validate(config, true);
+        JsonNode response = client(config).post().uri("/chat/completions")
+                .body(Map.of(
+                        "model", config.model(),
+                        "messages", List.of(
+                                Map.of("role", "system", "content", systemPrompt),
+                                Map.of("role", "user", "content", userPrompt)),
+                        "temperature", 0.2))
+                .retrieve().body(JsonNode.class);
+        String content = response == null ? null : response.at("/choices/0/message/content").asText(null);
+        if (content == null || content.isBlank()) throw new IllegalStateException("模型未返回有效文本");
+        return content;
+    }
+
+    private String callVision(AiRuntimeConfig config, String prompt, byte[] imageBytes, String mimeType) {
+        validate(config, false);
+        String dataUrl = "data:" + mimeType + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
+        JsonNode response = client(config).post().uri("/chat/completions")
+                .body(Map.of(
+                        "model", config.model(),
+                        "messages", List.of(Map.of(
+                                "role", "user",
+                                "content", List.of(
+                                        Map.of("type", "text", "text", prompt),
+                                        Map.of("type", "image_url", "image_url", Map.of("url", dataUrl))))),
+                        "temperature", 0))
+                .retrieve().body(JsonNode.class);
+        String content = response == null ? null : response.at("/choices/0/message/content").asText(null);
+        if (content == null || content.isBlank()) throw new IllegalStateException("多模态模型未返回OCR文字");
+        return content.strip();
+    }
+
+    private RestClient client(AiRuntimeConfig config) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(15));
+        factory.setReadTimeout(Duration.ofSeconds(75));
+        return RestClient.builder().baseUrl(config.apiBase().replaceAll("/+$", ""))
+                .requestFactory(factory).defaultHeader("Authorization", "Bearer " + config.apiKey()).build();
+    }
+
+    private void validate(AiRuntimeConfig config, boolean requireTextGeneration) {
+        if (!config.enabled() || config.apiKey() == null || config.apiBase() == null
+                || "mock".equalsIgnoreCase(config.provider())
+                || requireTextGeneration && !config.textGenerationEnabled()) {
+            throw new IllegalStateException("真实模型未启用或缺少配置");
         }
     }
 
-    public AiRuntimeStatus status() {
-        AiRuntimeConfig config = configService.getConfig();
-        return new AiRuntimeStatus(config.provider(), config.model(), config.enabled(), config.apiBase(),
-                config.textGenerationEnabled(), config.fileExtractionMode(), config.contractRiskMode(),
-                lastCallStatus, lastFallbackReason);
+    private String firstModel(List<AiRuntimeConfig> configs) {
+        return configs.isEmpty() ? null : configs.getFirst().model();
+    }
+
+    private void markSuccess(String firstModel, String usedModel) {
+        lastUsedModel = usedModel;
+        lastCallStatus = "success";
+        lastFallbackReason = firstModel != null && !firstModel.equals(usedModel)
+                ? "主模型 " + firstModel + " 调用失败，已自动切换备用模型 " + usedModel : null;
+    }
+
+    private void markFailed(String error) {
+        lastCallStatus = "failed";
+        lastFallbackReason = error == null ? "模型调用失败" : error;
     }
 }

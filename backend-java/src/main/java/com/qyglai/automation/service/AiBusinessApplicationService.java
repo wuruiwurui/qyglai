@@ -106,7 +106,7 @@ public class AiBusinessApplicationService {
     private JsonNode callJson(String scenario, String businessType, Long businessId, String promptCode,
                               String systemPrompt, String input) {
         long start = System.currentTimeMillis();
-        JsonNode node = modelGateway.generateJson(systemPrompt, input);
+        JsonNode node = modelGateway.generateJson(scenario, systemPrompt, input);
         boolean success = node != null && "success".equals(modelGateway.status().lastCallStatus());
         callLogService.record(scenario, businessType, businessId,
                 success ? modelGateway.status().model() : "fallback-local-rule", promptCode,

@@ -12,5 +12,6 @@
     "fileExtractionMode" : "model_first",
     "contractRiskMode" : "model_first",
     "remark" : "Java AI模型网关配置"
-  } ]
+  } ],
+  "scenarioRoutes" : [ ]
 }

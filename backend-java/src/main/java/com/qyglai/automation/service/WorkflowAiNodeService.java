@@ -56,7 +56,7 @@ public class WorkflowAiNodeService {
                 "variables", value(instance.getVariablesJson()),
                 "businessData", businessContext
         ));
-        JsonNode response = modelGateway.generateJson(
+        JsonNode response = modelGateway.generateJson("workflow_ai_review",
                 "你是企业审批流程中的AI复核节点。只能依据提供的业务数据审核，不得编造。"
                         + "只输出合法JSON：{\"decision\":\"auto_pass或manual_review\",\"confidence\":0到1,"
                         + "\"summary\":\"审核结论\",\"risks\":[\"风险说明\"]}。"

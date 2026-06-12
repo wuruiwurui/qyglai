@@ -381,6 +381,14 @@ export type AiModelProfile = AiRuntimeConfig & {
   current?: boolean;
 };
 
+export type AiScenarioRoute = {
+  scenario: string;
+  primaryProfileId: string;
+  primaryModel?: string;
+  fallbackProfileIds: string[];
+  fallbackModels?: string[];
+};
+
 export type AiModelCallLog = {
   id: string;
   providerId?: string | null;
@@ -701,6 +709,18 @@ export function switchAiModelProfile(id: string): Promise<AiModelProfile> {
 
 export function deleteAiModelProfile(id: string): Promise<void> {
   return request<void>(`/api/ai-governance/model-profiles/${id}`, { method: "DELETE" });
+}
+
+export function fetchAiScenarioRoutes(): Promise<AiScenarioRoute[]> {
+  return request<AiScenarioRoute[]>("/api/ai-governance/scenario-routes");
+}
+
+export function saveAiScenarioRoute(route: AiScenarioRoute): Promise<AiScenarioRoute> {
+  return request<AiScenarioRoute>("/api/ai-governance/scenario-routes", { method: "POST", body: JSON.stringify(route) });
+}
+
+export function deleteAiScenarioRoute(scenario: string): Promise<void> {
+  return request<void>(`/api/ai-governance/scenario-routes/${encodeURIComponent(scenario)}`, { method: "DELETE" });
 }
 
 export function fetchAiModelCallLogs(): Promise<AiModelCallLog[]> {

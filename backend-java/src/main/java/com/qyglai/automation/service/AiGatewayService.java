@@ -59,7 +59,7 @@ public class AiGatewayService {
         );
         String requestText = enrichedRequest.toString();
         BossChatResponse databaseResponse = bossBusinessContextService.fallbackResponse(context);
-        String answer = javaAiModelGateway.generateText(
+        String answer = javaAiModelGateway.generateText("boss_query",
                 "你是企业老板的经营助手。所有数字必须严格来自 Java 查询 MySQL 后提供的上下文，禁止编造或修改数字。"
                         + "请直接回答问题，说明关键数字、风险和下一步动作。",
                 "问题：" + request.question() + "\n时间范围：" + request.timeRange() + "\n数据库上下文：" + json(context),

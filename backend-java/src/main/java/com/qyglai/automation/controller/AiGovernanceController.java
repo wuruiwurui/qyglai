@@ -10,6 +10,8 @@ import com.qyglai.automation.dto.AiRuntimeStatus;
 import com.qyglai.automation.dto.AiModelProfile;
 import com.qyglai.automation.dto.AiModelProfileView;
 import com.qyglai.automation.dto.AiEvaluationDashboard;
+import com.qyglai.automation.dto.AiScenarioRoute;
+import com.qyglai.automation.dto.AiScenarioRouteView;
 import com.qyglai.automation.entity.AiEvaluationSampleEntity;
 import com.qyglai.automation.entity.AiModelCallLogEntity;
 import com.qyglai.automation.entity.AiModelProviderEntity;
@@ -98,6 +100,25 @@ public class AiGovernanceController {
     @DeleteMapping("/model-profiles/{id}")
     public ApiResponse<Void> deleteModelProfile(@PathVariable String id) {
         modelConfigService.deleteProfile(id);
+        return ApiResponse.ok(null);
+    }
+
+    /** 查询全部业务场景模型路由。 */
+    @GetMapping("/scenario-routes")
+    public ApiResponse<List<AiScenarioRouteView>> scenarioRoutes() {
+        return ApiResponse.ok(modelConfigService.listScenarioRoutes());
+    }
+
+    /** 保存业务场景的主模型与备用模型顺序。 */
+    @PostMapping("/scenario-routes")
+    public ApiResponse<AiScenarioRouteView> saveScenarioRoute(@RequestBody AiScenarioRoute request) {
+        return ApiResponse.ok(modelConfigService.saveScenarioRoute(request));
+    }
+
+    /** 删除业务场景路由，恢复使用当前默认模型。 */
+    @DeleteMapping("/scenario-routes/{scenario}")
+    public ApiResponse<Void> deleteScenarioRoute(@PathVariable String scenario) {
+        modelConfigService.deleteScenarioRoute(scenario);
         return ApiResponse.ok(null);
     }
 

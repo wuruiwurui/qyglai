@@ -3976,3 +3976,132 @@ tbody tr.selected {
     grid-template-columns: 1fr;
   }
 }
+.ai-routing-panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #dce4e1;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.ai-routing-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr);
+  gap: 18px;
+  align-items: start;
+  min-width: 0;
+}
+
+.ai-route-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ai-route-form > label {
+  display: grid;
+  gap: 6px;
+  color: #52615c;
+  font-size: 13px;
+}
+
+.ai-route-form select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 38px;
+  border: 1px solid #ccd7d3;
+  border-radius: 4px;
+  background: #fff;
+  padding: 0 10px;
+}
+
+.ai-route-form fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid #dce4e1;
+  border-radius: 5px;
+  padding: 12px;
+  min-width: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.ai-route-form fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ai-route-form fieldset label span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-route-form fieldset small {
+  color: #74827d;
+}
+
+.ai-route-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-route-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  max-height: 360px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+}
+
+.ai-route-list article {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dce4e1;
+  border-radius: 5px;
+  padding: 10px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.ai-route-list article.active {
+  border-color: #6eae96;
+  background: #f0f8f5;
+}
+
+.ai-route-list article div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ai-route-list article strong,
+.ai-route-list article small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-route-list article small,
+.ai-route-list article em {
+  color: #71817b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.ai-route-list article em {
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .ai-routing-layout {
+    grid-template-columns: 1fr;
+  }
+}

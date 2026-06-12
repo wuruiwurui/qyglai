@@ -38,7 +38,7 @@ public class JavaAiTaskService {
         String priority = highValue && overdue ? "P1" : overdue ? "P2" : "P3";
         int dueHours = "P1".equals(priority) ? 4 : "P2".equals(priority) ? 24 : 72;
         String fallback = highValue ? "电话确认决策人、预算和预计签约时间" : "发送跟进信息并预约下一次沟通";
-        String nextAction = modelGateway.generateText(
+        String nextAction = modelGateway.generateText("sales_followup",
                 "你是销售跟进助手。仅根据提供的数据输出一句明确的下一步动作，不得编造客户信息。",
                 "客户：" + request.customerName() + "，阶段：" + request.opportunityStage()
                         + "，未联系天数：" + request.lastContactDays() + "，商机金额：" + amount,

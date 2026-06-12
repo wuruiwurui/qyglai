@@ -6,6 +6,8 @@ import com.qyglai.automation.dto.AiModelProfileView;
 import com.qyglai.automation.dto.AiModelProfilesStore;
 import com.qyglai.automation.dto.AiRuntimeConfig;
 import com.qyglai.automation.dto.AiRuntimeConfigView;
+import com.qyglai.automation.dto.AiScenarioRoute;
+import com.qyglai.automation.dto.AiScenarioRouteView;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -64,7 +66,7 @@ public class JavaAiModelConfigService {
         profiles.removeIf(item -> item.id().equals(id));
         profiles.add(saved);
         String currentId = store.currentProfileId() == null ? id : store.currentProfileId();
-        writeStore(new AiModelProfilesStore(currentId, profiles));
+        writeStore(new AiModelProfilesStore(currentId, profiles, store.scenarioRoutes()));
         return view(saved, id.equals(currentId));
     }
 
@@ -76,7 +78,7 @@ public class JavaAiModelConfigService {
         AiModelProfile profile = store.profiles().stream().filter(item -> item.id().equals(id)).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("模型配置不存在"));
         if (!profile.enabled()) throw new IllegalArgumentException("请先启用该模型配置");
-        writeStore(new AiModelProfilesStore(id, store.profiles()));
+        writeStore(new AiModelProfilesStore(id, store.profiles(), store.scenarioRoutes()));
         return view(profile, true);
     }
 
@@ -88,7 +90,12 @@ public class JavaAiModelConfigService {
         if (id.equals(store.currentProfileId())) throw new IllegalArgumentException("当前使用模型不能删除，请先切换模型");
         List<AiModelProfile> profiles = new ArrayList<>(store.profiles());
         if (!profiles.removeIf(item -> item.id().equals(id))) throw new IllegalArgumentException("模型配置不存在");
-        writeStore(new AiModelProfilesStore(store.currentProfileId(), profiles));
+        List<AiScenarioRoute> routes = store.scenarioRoutes().stream()
+                .filter(route -> !id.equals(route.primaryProfileId()))
+                .map(route -> new AiScenarioRoute(route.scenario(), route.primaryProfileId(),
+                        route.fallbackProfileIds().stream().filter(fallbackId -> !id.equals(fallbackId)).toList()))
+                .toList();
+        writeStore(new AiModelProfilesStore(store.currentProfileId(), profiles, routes));
     }
 
     /**
@@ -117,7 +124,8 @@ public class JavaAiModelConfigService {
             try {
                 AiModelProfilesStore store = objectMapper.readValue(profilesPath.toFile(), AiModelProfilesStore.class);
                 return new AiModelProfilesStore(store.currentProfileId(),
-                        store.profiles() == null ? List.of() : store.profiles());
+                        store.profiles() == null ? List.of() : store.profiles(),
+                        store.scenarioRoutes() == null ? List.of() : store.scenarioRoutes());
             } catch (IOException ex) {
                 throw new IllegalStateException("读取AI多模型配置失败: " + ex.getMessage(), ex);
             }
@@ -131,7 +139,7 @@ public class JavaAiModelConfigService {
                 legacy.provider() + " / " + legacy.model(), legacy.provider(), legacy.apiBase(), legacy.apiKey(),
                 legacy.model(), legacy.enabled(), legacy.textGenerationEnabled(), legacy.fileExtractionMode(),
                 legacy.contractRiskMode(), legacy.remark());
-        AiModelProfilesStore store = new AiModelProfilesStore(profile.id(), List.of(profile));
+        AiModelProfilesStore store = new AiModelProfilesStore(profile.id(), List.of(profile), List.of());
         writeStore(store);
         return store;
     }
@@ -159,6 +167,83 @@ public class JavaAiModelConfigService {
     private AiModelProfile currentProfile(AiModelProfilesStore store) {
         if (store.currentProfileId() == null) return store.profiles().stream().findFirst().orElse(null);
         return store.profiles().stream().filter(item -> item.id().equals(store.currentProfileId())).findFirst().orElse(null);
+    }
+
+    /**
+     * 查询全部场景模型路由。
+     */
+    public synchronized List<AiScenarioRouteView> listScenarioRoutes() {
+        AiModelProfilesStore store = readStore();
+        return store.scenarioRoutes().stream().map(route -> routeView(route, store.profiles())).toList();
+    }
+
+    /**
+     * 保存场景模型路由。
+     */
+    public synchronized AiScenarioRouteView saveScenarioRoute(AiScenarioRoute request) {
+        AiModelProfilesStore store = readStore();
+        String scenario = required(request.scenario(), "场景编码");
+        AiModelProfile primary = requireEnabledProfile(store.profiles(), request.primaryProfileId());
+        List<String> fallbacks = request.fallbackProfileIds() == null ? List.of()
+                : request.fallbackProfileIds().stream().filter(id -> id != null && !id.isBlank())
+                .filter(id -> !id.equals(primary.id())).distinct().toList();
+        fallbacks.forEach(id -> requireEnabledProfile(store.profiles(), id));
+        AiScenarioRoute saved = new AiScenarioRoute(scenario, primary.id(), fallbacks);
+        List<AiScenarioRoute> routes = new ArrayList<>(store.scenarioRoutes());
+        routes.removeIf(route -> scenario.equals(route.scenario()));
+        routes.add(saved);
+        writeStore(new AiModelProfilesStore(store.currentProfileId(), store.profiles(), routes));
+        return routeView(saved, store.profiles());
+    }
+
+    /**
+     * 删除场景路由，删除后该场景恢复使用当前模型。
+     */
+    public synchronized void deleteScenarioRoute(String scenario) {
+        AiModelProfilesStore store = readStore();
+        List<AiScenarioRoute> routes = new ArrayList<>(store.scenarioRoutes());
+        routes.removeIf(route -> scenario.equals(route.scenario()));
+        writeStore(new AiModelProfilesStore(store.currentProfileId(), store.profiles(), routes));
+    }
+
+    /**
+     * 按场景解析可调用模型，主模型失败后按列表顺序尝试备用模型。
+     */
+    public synchronized List<AiRuntimeConfig> resolveConfigs(String scenario) {
+        AiModelProfilesStore store = readStore();
+        AiScenarioRoute route = store.scenarioRoutes().stream()
+                .filter(item -> item.scenario().equals(scenario)).findFirst().orElse(null);
+        List<AiModelProfile> selected = new ArrayList<>();
+        if (route != null) {
+            addEnabled(selected, store.profiles(), route.primaryProfileId());
+            route.fallbackProfileIds().forEach(id -> addEnabled(selected, store.profiles(), id));
+        }
+        if (selected.isEmpty()) {
+            AiModelProfile current = currentProfile(store);
+            if (current != null && current.enabled()) selected.add(current);
+        }
+        return selected.stream().map(this::toRuntimeConfig).toList();
+    }
+
+    private void addEnabled(List<AiModelProfile> selected, List<AiModelProfile> profiles, String id) {
+        profiles.stream().filter(item -> item.id().equals(id) && item.enabled())
+                .filter(item -> selected.stream().noneMatch(existing -> existing.id().equals(item.id())))
+                .findFirst().ifPresent(selected::add);
+    }
+
+    private AiModelProfile requireEnabledProfile(List<AiModelProfile> profiles, String id) {
+        return profiles.stream().filter(item -> item.id().equals(id) && item.enabled()).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("路由模型不存在或未启用: " + id));
+    }
+
+    private AiScenarioRouteView routeView(AiScenarioRoute route, List<AiModelProfile> profiles) {
+        AiModelProfile primary = profiles.stream().filter(item -> item.id().equals(route.primaryProfileId())).findFirst().orElse(null);
+        List<String> fallbackModels = route.fallbackProfileIds().stream()
+                .map(id -> profiles.stream().filter(item -> item.id().equals(id)).findFirst()
+                        .map(AiModelProfile::name).orElse("已删除模型"))
+                .toList();
+        return new AiScenarioRouteView(route.scenario(), route.primaryProfileId(),
+                primary == null ? "已删除模型" : primary.name(), route.fallbackProfileIds(), fallbackModels);
     }
 
     private AiRuntimeConfig toRuntimeConfig(AiModelProfile profile) {

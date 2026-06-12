@@ -34,7 +34,7 @@ public class JavaDocumentExtractionService {
         ExtractionResult rules = ruleExtraction(rawText, scenario);
         AiRuntimeConfig config = configService.getConfig();
         if ("rules_only".equals(config.fileExtractionMode())) return rules;
-        JsonNode node = modelGateway.generateJson(
+        JsonNode node = modelGateway.generateJson("file_parse_extract",
                 "你是企业发票和合同结构化抽取引擎。必须忠于原文，只输出合法JSON，不输出Markdown。金额不得使用发票号、订单号、航班号。",
                 "场景：" + scenario + "\n原文：\n" + limit(rawText, 24000)
                         + "\n只输出格式：{\"scenario\":\"invoice或contract或general\",\"confidence\":0.95,"
