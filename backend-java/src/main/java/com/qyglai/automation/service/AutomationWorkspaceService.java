@@ -104,6 +104,7 @@ public class AutomationWorkspaceService {
     private final BusinessEventService businessEventService;
     private final AiGatewayService aiGatewayService;
     private final WorkflowApprovalService workflowApprovalService;
+    private final AiBusinessApplicationService aiBusinessApplicationService;
     private final ObjectMapper objectMapper;
     private final KnowledgeRagService knowledgeRagService;
 
@@ -128,6 +129,7 @@ public class AutomationWorkspaceService {
                                       BusinessEventService businessEventService,
                                       AiGatewayService aiGatewayService,
                                       WorkflowApprovalService workflowApprovalService,
+                                      AiBusinessApplicationService aiBusinessApplicationService,
                                       ObjectMapper objectMapper,
                                       KnowledgeRagService knowledgeRagService) {
         this.contractRecordMapper = contractRecordMapper;
@@ -151,6 +153,7 @@ public class AutomationWorkspaceService {
         this.businessEventService = businessEventService;
         this.aiGatewayService = aiGatewayService;
         this.workflowApprovalService = workflowApprovalService;
+        this.aiBusinessApplicationService = aiBusinessApplicationService;
         this.objectMapper = objectMapper;
         this.knowledgeRagService = knowledgeRagService;
     }
@@ -681,32 +684,34 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public TicketClassifyResult classifyTicket(TextProcessRequest request) {
+        AiBusinessApplicationService.TicketDecision decision = aiBusinessApplicationService.classifyTicket(request.content());
         Long ticketId = IdWorker.getId();
         TicketEntity ticket = new TicketEntity();
         ticket.setId(ticketId);
         ticket.setTicketNo("TK-" + ticketId);
-        ticket.setCustomerName("示例客户");
+        ticket.setCustomerName("待识别客户");
         ticket.setSourceChannel("manual");
-        ticket.setTitle("客户咨询交付进度");
+        ticket.setTitle(request.content().length() > 30 ? request.content().substring(0, 30) : request.content());
         ticket.setContent(request.content());
-        ticket.setCategory("交付进度咨询");
-        ticket.setPriority("P2");
-        ticket.setSentiment("neutral");
+        ticket.setCategory(decision.category());
+        ticket.setPriority(decision.priority());
+        ticket.setSentiment(decision.sentiment());
         ticket.setStatus("open");
-        ticket.setConfidence(new BigDecimal("0.88"));
+        ticket.setConfidence(BigDecimal.valueOf(decision.confidence()));
         ticketMapper.insert(ticket);
 
         TicketReplySuggestionEntity suggestion = new TicketReplySuggestionEntity();
         suggestion.setTicketId(ticketId);
-        suggestion.setSuggestionText("建议先同步当前交付节点，并承诺下一次反馈时间。");
-        suggestion.setCitationJson("[\"历史工单FAQ\", \"交付SLA说明\"]");
-        suggestion.setConfidence(new BigDecimal("0.86"));
+        suggestion.setSuggestionText(decision.replySuggestion());
+        suggestion.setCitationJson("[]");
+        suggestion.setConfidence(BigDecimal.valueOf(decision.confidence()));
         suggestion.setAcceptedFlag(0);
         ticketReplySuggestionMapper.insert(suggestion);
 
         auditService.record("TICKET_CLASSIFY", "客服工单分类", "ticket", ticketId);
         businessEventService.publish("ticket.classified", ticketId, Map.of("priority", ticket.getPriority()));
-        return new TicketClassifyResult(ticket.getCategory(), ticket.getPriority(), ticket.getSentiment(), "客服主管", 0.88);
+        return new TicketClassifyResult(ticket.getCategory(), ticket.getPriority(), ticket.getSentiment(),
+                decision.suggestedOwner(), decision.confidence());
     }
 
     /**
@@ -766,20 +771,21 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ReportSummary generateReport(ReportGenerateRequest request) {
+        AiBusinessApplicationService.ReportContent generated = aiBusinessApplicationService.generateReport(request);
         Long reportId = IdWorker.getId();
         ReportRecordEntity record = new ReportRecordEntity();
         record.setId(reportId);
         record.setReportType(request.reportType());
         record.setTitle(request.reportType() + " - " + (request.timeRange() == null ? "默认周期" : request.timeRange()));
-        record.setSummary("销售新增客户稳定，客服高优工单上升，财务存在对账异常。");
-        record.setContent("一、销售进展；二、合同风险；三、财务对账；四、客服质量；五、明日重点。");
-        record.setSourceJson("[\"CRM\", \"合同台账\", \"财务系统\", \"客服系统\"]");
+        record.setSummary(generated.summary());
+        record.setContent(generated.content());
+        record.setSourceJson(toJson(generated.sources()));
         record.setSendStatus(request.autoSend() ? "pending_confirmation" : "draft");
         reportRecordMapper.insert(record);
         auditService.record("REPORT_GENERATE", "生成报表", "report_record", reportId);
         businessEventService.publish("report.generated", reportId, Map.of("reportType", request.reportType()));
 
-        return new ReportSummary(record.getTitle(), record.getSummary(), List.of("销售进展", "合同风险", "财务对账", "客服质量"), List.of("CRM", "合同台账", "财务系统", "客服系统"), record.getSendStatus());
+        return new ReportSummary(record.getTitle(), record.getSummary(), generated.sections(), generated.sources(), record.getSendStatus());
     }
 
     /**
@@ -840,7 +846,10 @@ public class AutomationWorkspaceService {
         return reviewTaskMapper.selectList(new LambdaQueryWrapper<ReviewTaskEntity>()
                         .orderByDesc(ReviewTaskEntity::getCreatedAt))
                 .stream()
-                .map(task -> new ReviewTask(String.valueOf(task.getId()), task.getScenario(), task.getTitle(), task.getRiskLevel(), task.getAssigneeUserId() == null ? "未分配" : "用户-" + task.getAssigneeUserId(), Instant.now()))
+                .map(task -> new ReviewTask(String.valueOf(task.getId()), task.getScenario(), task.getTitle(),
+                        task.getRiskLevel(), task.getAssigneeUserId() == null ? "未分配" : "用户-" + task.getAssigneeUserId(),
+                        task.getCreatedAt() == null ? Instant.now() : task.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant(),
+                        task.getStatus(), task.getReviewResult()))
                 .toList();
     }
 
@@ -857,7 +866,11 @@ public class AutomationWorkspaceService {
             return false;
         }
         task.setStatus("completed");
-        task.setReviewResult(result);
+        task.setReviewResult(toJson(Map.of(
+                "aiAdvice", task.getReviewResult() == null ? "" : task.getReviewResult(),
+                "humanResult", result,
+                "completedAt", LocalDateTime.now().toString()
+        )));
         task.setCompletedAt(LocalDateTime.now());
         reviewTaskMapper.updateById(task);
         auditService.record("REVIEW_COMPLETE", "完成人工复核", "review_task", taskId);
@@ -903,6 +916,8 @@ public class AutomationWorkspaceService {
     }
 
     private ReviewTaskEntity createReviewTask(String scenario, String businessType, Long businessId, String title, String riskLevel) {
+        AiBusinessApplicationService.ReviewDecision advice =
+                aiBusinessApplicationService.adviseReview(scenario, title, riskLevel);
         ReviewTaskEntity task = new ReviewTaskEntity();
         task.setTaskNo("RV-" + IdWorker.getId());
         task.setScenario(scenario);
@@ -911,6 +926,7 @@ public class AutomationWorkspaceService {
         task.setTitle(title);
         task.setRiskLevel(riskLevel);
         task.setStatus("pending");
+        task.setReviewResult(toJson(Map.of("aiAdvice", advice)));
         reviewTaskMapper.insert(task);
         return task;
     }

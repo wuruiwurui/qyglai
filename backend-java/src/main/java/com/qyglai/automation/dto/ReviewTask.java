@@ -8,6 +8,8 @@ public record ReviewTask(
         String title,
         String riskLevel,
         String assignee,
-        Instant createdAt
+        Instant createdAt,
+        String status,
+        String aiAdvice
 ) {
 }

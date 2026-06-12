@@ -34,6 +34,17 @@
             <div><span>当前节点</span><strong>{{ selectedTask.nodeName }}</strong></div>
             <div><span>发起时间</span><strong>{{ formatDate(detail.instance.startedAt) }}</strong></div>
           </div>
+          <section v-if="selectedAiResult" class="workflow-ai-review">
+            <div><Bot :size="18" /><span>AI 复核意见</span><em :class="{ pass: selectedAiResult.autoApproved }">{{ selectedAiResult.autoApproved ? "自动通过" : "转人工复核" }}</em></div>
+            <p>{{ selectedAiResult.summary }}</p>
+            <dl>
+              <div><dt>置信度</dt><dd>{{ Math.round(selectedAiResult.confidence * 100) }}%</dd></div>
+              <div><dt>使用模型</dt><dd>{{ selectedAiResult.modelName || "-" }}</dd></div>
+              <div><dt>模型调用</dt><dd>{{ selectedAiResult.modelSuccess ? "成功" : "失败并降级" }}</dd></div>
+            </dl>
+            <ul v-if="selectedAiResult.risks?.length"><li v-for="risk in selectedAiResult.risks" :key="risk">{{ risk }}</li></ul>
+            <small v-if="selectedAiResult.fallbackReason">{{ selectedAiResult.fallbackReason }}</small>
+          </section>
           <label class="workflow-comment"><span>审批意见</span><textarea v-model="comment" rows="4" placeholder="填写审批意见或驳回原因" /></label>
           <label class="workflow-transfer"><span>转交用户ID</span><input v-model="targetUserId" placeholder="转交时填写" /></label>
           <div class="workflow-actions">
@@ -188,6 +199,19 @@ const selectedTask = ref<WorkflowTask | null>(null);
 const comment = ref("");
 const targetUserId = ref("");
 const notice = ref("工作流已就绪");
+type WorkflowAiResult = {
+  decision: string; confidence: number; summary: string; risks: string[];
+  autoApproved: boolean; modelSuccess: boolean; modelName?: string; fallbackReason?: string;
+};
+const selectedAiResult = computed<WorkflowAiResult | null>(() => {
+  if (!selectedTask.value?.resultJson) return null;
+  try {
+    const result = JSON.parse(selectedTask.value.resultJson) as WorkflowAiResult;
+    return typeof result?.summary === "string" && typeof result?.autoApproved === "boolean" ? result : null;
+  } catch {
+    return null;
+  }
+});
 const startForm = ref({ workflowCode: "", businessType: "contract", businessId: "", title: "" });
 const definitionForm = ref({
   workflowCode: "custom_approval", workflowName: "自定义审批流程", scenario: "custom", status: "enabled",
@@ -271,7 +295,7 @@ async function submitDefinition() {
     if (new Set(codes).size !== codes.length) throw new Error("节点编码不能重复");
     definitionForm.value.definitionJson = JSON.stringify({
       nodes: designerNodes.value.map((node) => ({
-        code: node.code.trim(), name: node.name.trim() || node.code.trim(), dueHours: Math.max(1, Number(node.dueHours) || 24),
+        type: node.type, code: node.code.trim(), name: node.name.trim() || node.code.trim(), dueHours: Math.max(1, Number(node.dueHours) || 24),
         ...(node.assigneeUserId ? { assigneeUserId: Number(node.assigneeUserId) } : {})
       }))
     });
@@ -398,7 +422,7 @@ function statusLabel(value: string) {
 }
 
 function actionLabel(value: string) {
-  return ({ start: "发起审批", arrive: "进入节点", approve: "审批通过", approved: "审批通过", reject: "审批驳回", rejected: "审批驳回", transfer: "任务转交", complete: "流程完成" } as Record<string, string>)[value] || value;
+  return ({ start: "发起审批", arrive: "进入节点", approve: "审批通过", approved: "审批通过", reject: "审批驳回", rejected: "审批驳回", transfer: "任务转交", complete: "流程完成", ai_auto_approved: "AI 复核自动通过", ai_manual_review: "AI 复核转人工" } as Record<string, string>)[value] || value;
 }
 
 function formatDate(value?: string) {

@@ -3641,6 +3641,79 @@ tbody tr.selected {
   font-size: 12px;
 }
 
+.workflow-ai-review {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 14px;
+  background: #f6faf8;
+  border: 1px solid #cfe1d9;
+  border-radius: 5px;
+}
+
+.workflow-ai-review > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #216d55;
+  font-weight: 700;
+}
+
+.workflow-ai-review em {
+  margin-left: auto;
+  padding: 3px 7px;
+  color: #94621a;
+  background: #fff3d9;
+  border-radius: 4px;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.workflow-ai-review em.pass {
+  color: #126a4d;
+  background: #def3e9;
+}
+
+.workflow-ai-review p,
+.workflow-ai-review small {
+  margin: 0;
+  color: #596862;
+  font-size: 12px;
+}
+
+.workflow-ai-review dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  background: #dfe8e4;
+  border: 1px solid #dfe8e4;
+}
+
+.workflow-ai-review dl div {
+  padding: 8px;
+  background: #fff;
+}
+
+.workflow-ai-review dt,
+.workflow-ai-review dd {
+  margin: 0;
+  font-size: 11px;
+}
+
+.workflow-ai-review dt {
+  margin-bottom: 3px;
+  color: #78857f;
+}
+
+.workflow-ai-review ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #9a433c;
+  font-size: 12px;
+}
+
 @media (max-width: 1200px) {
   .workflow-designer {
     grid-template-columns: 190px minmax(400px, 1fr);

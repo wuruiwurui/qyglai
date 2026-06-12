@@ -93,6 +93,10 @@ export type ReviewTask = {
   assignee: string;
   /** 创建时间。 */
   createdAt: string;
+  /** 复核任务状态。 */
+  status?: string;
+  /** AI复核建议JSON。 */
+  aiAdvice?: string;
 };
 
 export type SalesFollowupTask = {
@@ -172,12 +176,16 @@ export type WorkflowTask = {
   nodeName: string;
   /** 处理人用户ID。 */
   assigneeUserId?: string;
+  /** 任务类型：人工审批或自动节点。 */
+  taskType?: string;
   /** 任务状态。 */
   status: string;
   /** 截止时间。 */
   dueTime?: string;
   /** 完成时间。 */
   completedAt?: string;
+  /** 节点执行结果，AI复核节点会保存模型结论、置信度和风险。 */
+  resultJson?: string;
 };
 
 export type WorkflowActionLog = {

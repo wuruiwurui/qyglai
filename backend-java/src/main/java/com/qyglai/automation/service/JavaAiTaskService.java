@@ -24,9 +24,11 @@ import org.springframework.stereotype.Service;
 public class JavaAiTaskService {
 
     private final JavaAiModelGateway modelGateway;
+    private final AiBusinessApplicationService aiBusinessApplicationService;
 
-    public JavaAiTaskService(JavaAiModelGateway modelGateway) {
+    public JavaAiTaskService(JavaAiModelGateway modelGateway, AiBusinessApplicationService aiBusinessApplicationService) {
         this.modelGateway = modelGateway;
+        this.aiBusinessApplicationService = aiBusinessApplicationService;
     }
 
     public SalesFollowupAdviceResponse salesFollowup(SalesFollowupAdviceRequest request) {
@@ -50,23 +52,16 @@ public class JavaAiTaskService {
         BigDecimal invoice = value(request.invoiceAmount());
         BigDecimal paid = value(request.paidAmount());
         BigDecimal difference = statement.subtract(invoice).subtract(paid).setScale(2, RoundingMode.HALF_UP);
-        List<String> risks = new ArrayList<>();
-        if (difference.signum() != 0) risks.add("对账单、发票与付款金额存在差异");
-        if (statement.compareTo(new BigDecimal("100000")) > 0) risks.add("金额较大，建议财务主管复核");
-        List<String> suggestions = risks.isEmpty()
-                ? List.of("金额匹配，可进入后续付款或归档流程")
-                : List.of("核对发票号码", "确认付款流水", "联系供应商补充差异说明");
-        return new ReconciliationAnalyzeResponse(risks.isEmpty() ? "matched" : "difference", difference, risks, suggestions);
+        AiBusinessApplicationService.ReconciliationDecision decision =
+                aiBusinessApplicationService.explainReconciliation(request.supplierName(), statement,
+                        invoice.add(paid), difference);
+        return new ReconciliationAnalyzeResponse(decision.status(), difference, decision.risks(), decision.suggestions());
     }
 
     public ReviewAdviceResponse review(ReviewAdviceRequest request) {
-        String content = request.content() == null ? "" : request.content();
-        boolean highRisk = "high".equalsIgnoreCase(request.riskLevel())
-                || containsAny(content, "违约", "逾期", "差异", "投诉", "赔偿");
-        return new ReviewAdviceResponse(highRisk ? "need_review" : "auto_pass",
-                highRisk ? List.of("存在高风险等级或风险关键词") : List.of("内容完整且未命中高风险规则"),
-                List.of("核对金额", "核对主体", "确认审批链路", "记录处理结论"),
-                highRisk ? 0.91 : 0.86);
+        AiBusinessApplicationService.ReviewDecision decision =
+                aiBusinessApplicationService.adviseReview(request.scenario(), request.content(), request.riskLevel());
+        return new ReviewAdviceResponse(decision.decision(), decision.reasons(), decision.checklist(), decision.confidence());
     }
 
     public PromptEvaluateResponse evaluatePrompt(PromptEvaluateRequest request) {

@@ -39,6 +39,7 @@ public class WorkflowApprovalService {
     private final WorkflowActionLogMapper actionLogMapper;
     private final AuditService auditService;
     private final BusinessApprovalStatusService businessApprovalStatusService;
+    private final WorkflowAiNodeService workflowAiNodeService;
     private final ObjectMapper objectMapper;
 
     public WorkflowApprovalService(WorkflowDefinitionMapper definitionMapper,
@@ -47,6 +48,7 @@ public class WorkflowApprovalService {
                                    WorkflowActionLogMapper actionLogMapper,
                                    AuditService auditService,
                                    BusinessApprovalStatusService businessApprovalStatusService,
+                                   WorkflowAiNodeService workflowAiNodeService,
                                    ObjectMapper objectMapper) {
         this.definitionMapper = definitionMapper;
         this.instanceMapper = instanceMapper;
@@ -54,6 +56,7 @@ public class WorkflowApprovalService {
         this.actionLogMapper = actionLogMapper;
         this.auditService = auditService;
         this.businessApprovalStatusService = businessApprovalStatusService;
+        this.workflowAiNodeService = workflowAiNodeService;
         this.objectMapper = objectMapper;
     }
 
@@ -119,6 +122,7 @@ public class WorkflowApprovalService {
         WorkflowTaskEntity task = createTask(instance.getId(), first, initiatorUserId);
         recordAction(instance.getId(), task.getId(), first.code(), "start", initiatorUserId, null,
                 stringVariable(request.variables(), "title", "发起审批"));
+        executeAiNodeIfNeeded(instance, definition, nodes, 0, task, initiatorUserId);
         auditService.record("WORKFLOW_START", "发起审批流程", "workflow_instance", instance.getId());
         return summary(instance, definition.getWorkflowCode());
     }
@@ -225,6 +229,7 @@ public class WorkflowApprovalService {
             instance.setCurrentNode(next.code());
             instanceMapper.updateById(instance);
             recordAction(instance.getId(), nextTask.getId(), next.code(), "arrive", operatorUserId, nextTask.getAssigneeUserId(), "进入下一审批节点");
+            executeAiNodeIfNeeded(instance, definition, nodes, currentIndex + 1, nextTask, operatorUserId);
         }
         auditService.record("WORKFLOW_APPROVE", "审批通过", "workflow_task", task.getId());
         return detail(instance.getId());
@@ -275,11 +280,57 @@ public class WorkflowApprovalService {
         task.setNodeCode(node.code());
         task.setNodeName(node.name());
         task.setAssigneeUserId(node.assigneeUserId() == null ? fallbackUserId : node.assigneeUserId());
-        task.setTaskType("manual");
+        task.setTaskType(node.isAi() ? "auto" : "manual");
         task.setStatus("pending");
         task.setDueTime(LocalDateTime.now().plusHours(node.dueHours()));
         taskMapper.insert(task);
         return task;
+    }
+
+    /**
+     * AI 节点自动执行。高置信度且无风险时自动流转，其他情况保留为人工待办。
+     */
+    private void executeAiNodeIfNeeded(WorkflowInstanceEntity instance, WorkflowDefinitionEntity definition,
+                                       List<NodeDefinition> nodes, int nodeIndex, WorkflowTaskEntity task,
+                                       Long operatorUserId) {
+        NodeDefinition node = nodes.get(nodeIndex);
+        if (!node.isAi()) {
+            return;
+        }
+        WorkflowAiNodeService.AiNodeResult result = workflowAiNodeService.review(instance, node.code(), node.name());
+        task.setResultJson(toJson(result));
+        if (!result.autoApproved()) {
+            task.setTaskType("manual");
+            taskMapper.updateById(task);
+            recordAction(instance.getId(), task.getId(), node.code(), "ai_manual_review", operatorUserId,
+                    task.getAssigneeUserId(), result.summary());
+            auditService.record("WORKFLOW_AI_MANUAL_REVIEW", "AI复核转人工审批", "workflow_task", task.getId());
+            return;
+        }
+
+        task.setStatus("approved");
+        task.setCompletedAt(LocalDateTime.now());
+        taskMapper.updateById(task);
+        recordAction(instance.getId(), task.getId(), node.code(), "ai_auto_approved", null, null, result.summary());
+        auditService.record("WORKFLOW_AI_AUTO_APPROVE", "AI复核自动通过", "workflow_task", task.getId());
+
+        if (nodeIndex + 1 >= nodes.size()) {
+            instance.setStatus("approved");
+            instance.setCurrentNode("DONE");
+            instance.setEndedAt(LocalDateTime.now());
+            instanceMapper.updateById(instance);
+            businessApprovalStatusService.markApproved(instance);
+            recordAction(instance.getId(), task.getId(), node.code(), "complete", null, null, "AI复核后流程自动完成");
+            return;
+        }
+
+        NodeDefinition next = nodes.get(nodeIndex + 1);
+        WorkflowTaskEntity nextTask = createTask(instance.getId(), next, instance.getInitiatorUserId());
+        instance.setCurrentNode(next.code());
+        instanceMapper.updateById(instance);
+        recordAction(instance.getId(), nextTask.getId(), next.code(), "arrive", null,
+                nextTask.getAssigneeUserId(), "AI复核通过，进入下一审批节点");
+        executeAiNodeIfNeeded(instance, definition, nodes, nodeIndex + 1, nextTask, operatorUserId);
     }
 
     private void recordAction(Long instanceId, Long taskId, String nodeCode, String action, Long operatorUserId,
@@ -330,13 +381,15 @@ public class WorkflowApprovalService {
             List<NodeDefinition> result = new ArrayList<>();
             for (JsonNode node : nodeArray) {
                 if (node.isTextual()) {
-                    result.add(new NodeDefinition(node.asText(), node.asText(), null, 24));
+                    String code = node.asText();
+                    result.add(new NodeDefinition(inferNodeType(code, code), code, code, null, 24));
                 } else {
                     String code = node.path("code").asText();
                     if (code.isBlank()) {
                         throw new IllegalArgumentException("审批节点编码不能为空");
                     }
-                    result.add(new NodeDefinition(code, node.path("name").asText(code),
+                    String name = node.path("name").asText(code);
+                    result.add(new NodeDefinition(node.path("type").asText(inferNodeType(code, name)), code, name,
                             node.hasNonNull("assigneeUserId") ? node.path("assigneeUserId").asLong() : null,
                             Math.max(1, node.path("dueHours").asInt(24))));
                 }
@@ -354,6 +407,11 @@ public class WorkflowApprovalService {
             }
         }
         throw new IllegalArgumentException("当前审批节点不在流程定义中");
+    }
+
+    private String inferNodeType(String code, String name) {
+        String text = ((code == null ? "" : code) + " " + (name == null ? "" : name)).toLowerCase();
+        return text.contains("ai") || text.contains("智能") ? "ai" : "approval";
     }
 
     private WorkflowInstanceEntity requireInstance(Long instanceId) {
@@ -392,6 +450,9 @@ public class WorkflowApprovalService {
     }
 
     /** 流程定义中的顺序审批节点。 */
-    private record NodeDefinition(String code, String name, Long assigneeUserId, int dueHours) {
+    private record NodeDefinition(String type, String code, String name, Long assigneeUserId, int dueHours) {
+        private boolean isAi() {
+            return "ai".equalsIgnoreCase(type);
+        }
     }
 }

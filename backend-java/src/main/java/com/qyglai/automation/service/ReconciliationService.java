@@ -23,11 +23,14 @@ public class ReconciliationService {
     private final ReconciliationBatchMapper batchMapper;
     private final ReconciliationItemMapper itemMapper;
     private final AuditService auditService;
+    private final AiBusinessApplicationService aiBusinessApplicationService;
 
-    public ReconciliationService(ReconciliationBatchMapper batchMapper, ReconciliationItemMapper itemMapper, AuditService auditService) {
+    public ReconciliationService(ReconciliationBatchMapper batchMapper, ReconciliationItemMapper itemMapper,
+                                 AuditService auditService, AiBusinessApplicationService aiBusinessApplicationService) {
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
         this.auditService = auditService;
+        this.aiBusinessApplicationService = aiBusinessApplicationService;
     }
 
     /**
@@ -49,6 +52,8 @@ public class ReconciliationService {
         batch.setDiffAmount(BigDecimal.ZERO);
         batch.setStatus("pending");
         batchMapper.insert(batch);
+        AiBusinessApplicationService.ReconciliationDecision analysis =
+                aiBusinessApplicationService.explainReconciliation(batch.getSupplierName(), amount, amount, BigDecimal.ZERO);
 
         ReconciliationItemEntity item = new ReconciliationItemEntity();
         item.setBatchId(batch.getId());
@@ -57,7 +62,8 @@ public class ReconciliationService {
         item.setExpectedAmount(amount);
         item.setActualAmount(amount);
         item.setDiffAmount(BigDecimal.ZERO);
-        item.setStatus("matched");
+        item.setDiffReason(analysis.summary());
+        item.setStatus(analysis.status());
         itemMapper.insert(item);
         auditService.record("RECONCILIATION_CREATE", "创建对账批次", "reconciliation_batch", batch.getId());
         return batch;
@@ -81,4 +87,3 @@ public class ReconciliationService {
         return itemMapper.selectList(new LambdaQueryWrapper<ReconciliationItemEntity>().orderByDesc(ReconciliationItemEntity::getCreatedAt));
     }
 }
-
