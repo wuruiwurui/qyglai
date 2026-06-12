@@ -399,6 +399,33 @@ export type AiModelCallLog = {
   createdAt?: string | null;
 };
 
+export type AiEvaluationPerformance = {
+  name: string;
+  calls: number;
+  successfulCalls: number;
+  successRate: number;
+  averageLatencyMs: number;
+  totalTokens: number;
+};
+
+export type AiEvaluationDashboard = {
+  overview: {
+    totalCalls: number; successfulCalls: number; successRate: number;
+    averageLatencyMs: number; totalTokens: number; failedCalls: number;
+  };
+  modelPerformance: AiEvaluationPerformance[];
+  scenarioPerformance: AiEvaluationPerformance[];
+  fieldCorrections: Array<{
+    fieldKey: string; fieldName: string; correctionCount: number;
+    affectedFiles: number; affectedBusinesses: number;
+  }>;
+  feedback: {
+    correctionCount: number; correctionBatches: number; affectedFiles: number;
+    reviewTasks: number; completedReviews: number; feedbackSamples: number;
+    aiAutoApproved: number; aiManualReview: number; aiAutoApprovalRate: number;
+  };
+};
+
 export type KnowledgeSpace = {
   id: string;
   spaceCode: string;
@@ -678,6 +705,10 @@ export function deleteAiModelProfile(id: string): Promise<void> {
 
 export function fetchAiModelCallLogs(): Promise<AiModelCallLog[]> {
   return request<AiModelCallLog[]>("/api/ai-governance/model-call-logs");
+}
+
+export function fetchAiEvaluationDashboard(days = 30): Promise<AiEvaluationDashboard> {
+  return request<AiEvaluationDashboard>(`/api/ai-governance/evaluation-dashboard?days=${days}`);
 }
 
 export function fetchKnowledgeSpaces(): Promise<KnowledgeSpace[]> {

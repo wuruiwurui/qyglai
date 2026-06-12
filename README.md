@@ -81,6 +81,21 @@
 | `GET /api/ai-governance/runtime-status` | 查询当前模型和最近调用状态 |
 | `GET /api/ai-governance/model-call-logs` | 查询模型调用日志 |
 
+### AI 效果评估中心
+
+- AI 治理页面提供基于真实业务数据的效果评估中心，支持查看最近 `7` 天、`30` 天、`90` 天或全部数据。
+- 实时统计模型调用总量、成功率、失败次数、平均耗时和累计 Token。
+- 按模型和业务场景对比调用量、成功率、平均耗时和 Token，便于定位效果或稳定性问题。
+- 根据字段修正历史展示高频人工修正字段、影响文件数和影响业务记录数；当前采用修正频次口径，不会将未经人工确认的数据误标为字段准确率。
+- 汇总字段修正批次、人工复核任务、有效反馈样本、AI 自动通过和转人工次数，展示模型输出进入业务后的反馈闭环。
+- 评估数据直接聚合 `ai_model_call_log`、`field_correction_history`、`review_task` 和 `workflow_action_log`，无需额外维护统计表。
+
+#### AI 效果评估接口
+
+| 接口 | 功能 |
+|---|---|
+| `GET /api/ai-governance/evaluation-dashboard?days=30` | 查询指定时间范围内的 AI 效果评估指标 |
+
 ### 文件处理闭环
 
 - 支持 PDF、Word、Excel、JSON、CSV 和文本文件解析。

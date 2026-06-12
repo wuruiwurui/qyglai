@@ -9,6 +9,7 @@ import com.qyglai.automation.dto.AiRuntimeConfigView;
 import com.qyglai.automation.dto.AiRuntimeStatus;
 import com.qyglai.automation.dto.AiModelProfile;
 import com.qyglai.automation.dto.AiModelProfileView;
+import com.qyglai.automation.dto.AiEvaluationDashboard;
 import com.qyglai.automation.entity.AiEvaluationSampleEntity;
 import com.qyglai.automation.entity.AiModelCallLogEntity;
 import com.qyglai.automation.entity.AiModelProviderEntity;
@@ -17,11 +18,13 @@ import com.qyglai.automation.service.AiGovernanceService;
 import com.qyglai.automation.service.AutomationWorkspaceService;
 import com.qyglai.automation.service.JavaAiModelConfigService;
 import com.qyglai.automation.service.JavaAiModelGateway;
+import com.qyglai.automation.service.AiEvaluationService;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
@@ -38,13 +41,16 @@ public class AiGovernanceController {
     private final AiGovernanceService aiGovernanceService;
     private final JavaAiModelConfigService modelConfigService;
     private final JavaAiModelGateway modelGateway;
+    private final AiEvaluationService aiEvaluationService;
 
     public AiGovernanceController(AutomationWorkspaceService service, AiGovernanceService aiGovernanceService,
-                                  JavaAiModelConfigService modelConfigService, JavaAiModelGateway modelGateway) {
+                                  JavaAiModelConfigService modelConfigService, JavaAiModelGateway modelGateway,
+                                  AiEvaluationService aiEvaluationService) {
         this.service = service;
         this.aiGovernanceService = aiGovernanceService;
         this.modelConfigService = modelConfigService;
         this.modelGateway = modelGateway;
+        this.aiEvaluationService = aiEvaluationService;
     }
 
     @GetMapping("/runtime-config")
@@ -103,6 +109,12 @@ public class AiGovernanceController {
     @GetMapping("/model-call-logs")
     public ApiResponse<List<AiModelCallLogEntity>> modelCallLogs() {
         return ApiResponse.ok(service.listAiModelCallLogs());
+    }
+
+    /** 查询 AI 效果评估中心实时指标。 */
+    @GetMapping("/evaluation-dashboard")
+    public ApiResponse<AiEvaluationDashboard> evaluationDashboard(@RequestParam(defaultValue = "30") int days) {
+        return ApiResponse.ok(aiEvaluationService.dashboard(days));
     }
 
     /**

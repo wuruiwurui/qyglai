@@ -74,6 +74,64 @@
       </section>
     </section>
 
+    <section v-if="evaluation" class="ai-evaluation-center">
+      <div class="file-section-head">
+        <div><p>效果评估</p><h2>AI 业务效果评估中心</h2></div>
+        <select v-model.number="evaluationDays" class="ai-evaluation-range" @change="loadEvaluation">
+          <option :value="7">最近 7 天</option><option :value="30">最近 30 天</option>
+          <option :value="90">最近 90 天</option><option :value="0">全部数据</option>
+        </select>
+      </div>
+      <div class="ai-evaluation-metrics">
+        <article><span><Activity :size="16" />模型调用</span><strong>{{ evaluation.overview.totalCalls }}</strong><small>失败 {{ evaluation.overview.failedCalls }} 次</small></article>
+        <article><span><CheckCircle2 :size="16" />调用成功率</span><strong>{{ evaluation.overview.successRate }}%</strong><small>成功 {{ evaluation.overview.successfulCalls }} 次</small></article>
+        <article><span><Gauge :size="16" />平均耗时</span><strong>{{ evaluation.overview.averageLatencyMs }}ms</strong><small>累计 Token {{ evaluation.overview.totalTokens }}</small></article>
+        <article><span><GitCompare :size="16" />AI 自动通过率</span><strong>{{ evaluation.feedback.aiAutoApprovalRate }}%</strong><small>转人工 {{ evaluation.feedback.aiManualReview }} 次</small></article>
+      </div>
+      <div class="ai-evaluation-grid">
+        <section>
+          <header><div><strong>模型表现</strong><small>成功率、耗时与调用量对比</small></div></header>
+          <div class="ai-performance-list">
+            <article v-for="item in evaluation.modelPerformance.slice(0, 6)" :key="item.name">
+              <div><strong>{{ item.name }}</strong><small>{{ item.calls }} 次 · {{ item.averageLatencyMs }}ms</small></div>
+              <div class="ai-rate-track"><span :style="{ width: `${item.successRate}%` }"></span></div><em>{{ item.successRate }}%</em>
+            </article>
+          </div>
+        </section>
+        <section>
+          <header><div><strong>高频修正字段</strong><small>人工修正暴露的模型薄弱字段</small></div></header>
+          <div class="ai-correction-list">
+            <article v-for="item in evaluation.fieldCorrections.slice(0, 6)" :key="item.fieldKey">
+              <span><PencilLine :size="15" /></span>
+              <div><strong>{{ item.fieldName }}</strong><small>影响 {{ item.affectedFiles }} 个文件</small></div>
+              <em>{{ item.correctionCount }} 次</em>
+            </article>
+            <div v-if="!evaluation.fieldCorrections.length" class="file-empty">暂无人工字段修正记录</div>
+          </div>
+        </section>
+        <section>
+          <header><div><strong>业务场景表现</strong><small>定位高失败率或高延迟的 AI 场景</small></div></header>
+          <div class="ai-performance-list">
+            <article v-for="item in evaluation.scenarioPerformance.slice(0, 6)" :key="item.name">
+              <div><strong>{{ scenarioLabel(item.name) }}</strong><small>{{ item.calls }} 次 · {{ item.averageLatencyMs }}ms</small></div>
+              <div class="ai-rate-track"><span :style="{ width: `${item.successRate}%` }"></span></div><em>{{ item.successRate }}%</em>
+            </article>
+          </div>
+        </section>
+        <section class="ai-feedback-panel">
+          <header><div><strong>反馈闭环</strong><small>AI 输出进入人工处理后的反馈数据</small></div></header>
+          <dl>
+            <div><dt>字段修正批次</dt><dd>{{ evaluation.feedback.correctionBatches }}</dd></div>
+            <div><dt>人工复核任务</dt><dd>{{ evaluation.feedback.reviewTasks }}</dd></div>
+            <div><dt>已完成复核</dt><dd>{{ evaluation.feedback.completedReviews }}</dd></div>
+            <div><dt>有效反馈样本</dt><dd>{{ evaluation.feedback.feedbackSamples }}</dd></div>
+            <div><dt>AI 自动通过</dt><dd>{{ evaluation.feedback.aiAutoApproved }}</dd></div>
+            <div><dt>AI 转人工</dt><dd>{{ evaluation.feedback.aiManualReview }}</dd></div>
+          </dl>
+        </section>
+      </div>
+    </section>
+
     <section class="ai-log-panel">
       <div class="file-section-head">
         <div><p>调用观测</p><h2>模型调用日志</h2></div>
@@ -99,16 +157,18 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { CheckCircle2, Cpu, Loader2, Plus, Save, Trash2 } from "lucide-vue-next";
+import { Activity, CheckCircle2, Cpu, Gauge, GitCompare, Loader2, PencilLine, Plus, Save, Trash2 } from "lucide-vue-next";
 import {
-  deleteAiModelProfile, fetchAiModelCallLogs, fetchAiModelProfiles, fetchAiRuntimeStatus,
-  saveAiModelProfile, switchAiModelProfile, type AiModelCallLog, type AiModelProfile, type AiRuntimeStatus
+  deleteAiModelProfile, fetchAiEvaluationDashboard, fetchAiModelCallLogs, fetchAiModelProfiles, fetchAiRuntimeStatus,
+  saveAiModelProfile, switchAiModelProfile, type AiEvaluationDashboard, type AiModelCallLog, type AiModelProfile, type AiRuntimeStatus
 } from "../services/api";
 
 type LoadState = "idle" | "loading" | "success" | "error";
 const status = ref<AiRuntimeStatus | null>(null);
 const profiles = ref<AiModelProfile[]>([]);
 const logs = ref<AiModelCallLog[]>([]);
+const evaluation = ref<AiEvaluationDashboard | null>(null);
+const evaluationDays = ref(30);
 const state = ref<LoadState>("idle");
 const notice = ref("模型切换后，下一次真实模型调用立即生效");
 const emptyProfile = (): AiModelProfile => ({
@@ -123,12 +183,19 @@ onMounted(loadAll);
 async function loadAll() {
   state.value = "loading";
   try {
-    [profiles.value, status.value, logs.value] = await Promise.all([fetchAiModelProfiles(), fetchAiRuntimeStatus(), fetchAiModelCallLogs()]);
+    [profiles.value, status.value, logs.value, evaluation.value] = await Promise.all([
+      fetchAiModelProfiles(), fetchAiRuntimeStatus(), fetchAiModelCallLogs(), fetchAiEvaluationDashboard(evaluationDays.value)
+    ]);
     const selected = profiles.value.find((item) => item.id === config.value.id) ?? currentProfile.value ?? profiles.value[0];
     config.value = selected ? { ...selected, apiKey: "" } : emptyProfile();
     notice.value = "已加载模型配置";
     state.value = "success";
   } catch (error) { fail(error, "模型配置加载失败"); }
+}
+
+async function loadEvaluation() {
+  try { evaluation.value = await fetchAiEvaluationDashboard(evaluationDays.value); }
+  catch (error) { fail(error, "AI效果评估加载失败"); }
 }
 
 function startCreate() { config.value = emptyProfile(); notice.value = "填写新模型连接信息"; }
@@ -162,7 +229,7 @@ async function removeCurrent() {
 function fail(error: unknown, fallback: string) { notice.value = error instanceof Error ? error.message : fallback; state.value = "error"; }
 function providerLabel(value?: string) { return ({ doubao: "豆包", openai: "OpenAI兼容", local: "本地模型", mock: "模拟模型" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function formatStatus(value?: string) { return ({ not_called: "尚未调用", success: "最近调用成功", fallback: "当前已降级", failed: "调用失败" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
-function scenarioLabel(value?: string | null) { return ({ boss_query: "老板问答", file_parse_extract: "文件解析抽取", knowledge_query: "知识问答" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
+function scenarioLabel(value?: string | null) { return ({ boss_query: "老板问答", file_parse_extract: "文件解析抽取", knowledge_query: "知识问答", workflow_ai_review: "工作流 AI 复核", ticket_classify: "客服分类", reconciliation_analysis: "对账分析", review_advice: "复核建议", report_generate: "报表生成" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function businessTypeLabel(value?: string | null) { return ({ report: "报表", file: "文件", contract: "合同", invoice: "发票", ticket: "客服工单", company: "全公司知识库", legal: "法务知识库", finance: "财务知识库", sales: "销售知识库" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function formatTime(value?: string | null) { return value ? value.replace("T", " ").slice(0, 19) : "-"; }
 </script>
