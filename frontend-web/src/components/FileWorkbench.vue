@@ -16,10 +16,10 @@
           </select>
         </label>
         <label class="file-picker">
-          <input type="file" @change="handleFileChange" />
+          <input type="file" accept=".pdf,.docx,.xlsx,.xls,.xlsm,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.bmp,.webp,.tif,.tiff" @change="handleFileChange" />
           <UploadCloud :size="20" />
-          <strong>{{ selectedFile?.name ?? "选择 Word、Excel、PDF 或文本文件" }}</strong>
-          <small>{{ selectedFile ? formatBytes(selectedFile.size) : "上传后会自动刷新文件列表和详情" }}</small>
+          <strong>{{ selectedFile?.name ?? "选择文档、图片或扫描版 PDF" }}</strong>
+          <small>{{ selectedFile ? formatBytes(selectedFile.size) : "图片与扫描件会自动调用当前多模态模型进行 OCR" }}</small>
         </label>
         <button class="submit-action" type="submit" :disabled="state === 'loading' || !selectedFile">
           <Loader2 v-if="state === 'loading'" class="spin" :size="16" />
@@ -145,6 +145,12 @@
           </section>
 
           <section v-if="activeTab === 'text'" class="raw-text-panel">
+            <div class="ocr-result-meta">
+              <span :class="{ active: detail.parseResult?.ocrEngine && detail.parseResult.ocrEngine !== 'text-parser' && detail.parseResult.ocrEngine !== 'manual' }">
+                {{ ocrEngineLabel(detail.parseResult?.ocrEngine) }}
+              </span>
+              <small>识别置信度 {{ formatConfidence(detail.parseResult?.confidence) }}</small>
+            </div>
             <pre>{{ detail.parseResult?.rawText ?? "暂无解析原文" }}</pre>
           </section>
 
@@ -399,6 +405,19 @@ async function loadCorrections() {
 
 function formatDate(value?: string) {
   return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-";
+}
+
+function ocrEngineLabel(value?: string) {
+  return ({
+    "multimodal-model": "图片 OCR",
+    "pdfbox+multimodal-model": "扫描 PDF OCR",
+    "text-parser": "原生文本解析",
+    manual: "人工录入"
+  } as Record<string, string>)[value ?? ""] ?? value ?? "原生文本解析";
+}
+
+function formatConfidence(value?: number) {
+  return value === undefined || value === null ? "-" : `${Math.round(Number(value) * 100)}%`;
 }
 
 function formatBytes(size?: number) {

@@ -1452,6 +1452,32 @@ th {
   border-radius: 7px;
 }
 
+.ocr-result-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.ocr-result-meta span {
+  padding: 4px 8px;
+  border: 1px solid #d8dfdc;
+  border-radius: 4px;
+  color: #64736d;
+  font-size: 12px;
+}
+
+.ocr-result-meta span.active {
+  border-color: #93c8b4;
+  background: #edf8f3;
+  color: #147452;
+}
+
+.ocr-result-meta small {
+  color: #75837e;
+}
+
 .business-link-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

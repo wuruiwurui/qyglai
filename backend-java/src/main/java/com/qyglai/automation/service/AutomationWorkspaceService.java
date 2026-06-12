@@ -297,6 +297,10 @@ public class AutomationWorkspaceService {
     }
 
     private DocParseResultEntity saveParseResult(Long fileId, String rawText, ExtractionResult extraction) {
+        return saveParseResult(fileId, rawText, extraction, "manual");
+    }
+
+    private DocParseResultEntity saveParseResult(Long fileId, String rawText, ExtractionResult extraction, String ocrEngine) {
         DocParseResultEntity result = new DocParseResultEntity();
         result.setFileId(fileId);
         result.setPageNo(1);
@@ -304,7 +308,7 @@ public class AutomationWorkspaceService {
         if (extraction != null) {
             result.setLayoutJson(toJson(Map.of("extraction", extraction)));
         }
-        result.setOcrEngine("manual");
+        result.setOcrEngine(ocrEngine == null || ocrEngine.isBlank() ? "text-parser" : ocrEngine);
         result.setConfidence(new BigDecimal("1.0000"));
         result.setStatus("completed");
         docParseResultMapper.insert(result);
@@ -335,7 +339,8 @@ public class AutomationWorkspaceService {
             throw new IllegalStateException("AI文件解析未返回有效结果");
         }
 
-        DocParseResultEntity parseResult = saveParseResult(asset.getId(), aiResult.parsed().rawText(), aiResult.extraction());
+        DocParseResultEntity parseResult = saveParseResult(asset.getId(), aiResult.parsed().rawText(),
+                aiResult.extraction(), aiResult.parsed().ocrEngine());
         Object businessRecord = createBusinessRecordFromExtraction(asset, aiResult.extraction());
         ReviewTaskEntity reviewTask = null;
         if (aiResult.extraction().reviewRequired()) {

@@ -1,6 +1,7 @@
 package com.qyglai.automation.service;
 
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -89,6 +90,57 @@ public class JavaAiModelGateway {
             lastCallStatus = "fallback";
             lastFallbackReason = ex.getMessage();
             return fallback;
+        }
+    }
+
+    /**
+     * 调用当前多模态模型识别图片文字。
+     *
+     * @param prompt OCR 提示词
+     * @param imageBytes 图片字节
+     * @param mimeType 图片 MIME 类型
+     * @return 模型识别文字
+     */
+    public String generateVisionText(String prompt, byte[] imageBytes, String mimeType) {
+        AiRuntimeConfig config = configService.getConfig();
+        if (!config.enabled() || config.apiKey() == null || config.apiBase() == null
+                || "mock".equalsIgnoreCase(config.provider())) {
+            throw new IllegalStateException("OCR需要启用支持图片理解的真实模型");
+        }
+        try {
+            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+            factory.setConnectTimeout(Duration.ofSeconds(15));
+            factory.setReadTimeout(Duration.ofSeconds(120));
+            RestClient client = RestClient.builder()
+                    .baseUrl(config.apiBase().replaceAll("/+$", ""))
+                    .requestFactory(factory)
+                    .defaultHeader("Authorization", "Bearer " + config.apiKey())
+                    .build();
+            String dataUrl = "data:" + mimeType + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
+            JsonNode response = client.post()
+                    .uri("/chat/completions")
+                    .body(Map.of(
+                            "model", config.model(),
+                            "messages", List.of(Map.of(
+                                    "role", "user",
+                                    "content", List.of(
+                                            Map.of("type", "text", "text", prompt),
+                                            Map.of("type", "image_url", "image_url", Map.of("url", dataUrl))
+                                    )
+                            )),
+                            "temperature", 0
+                    ))
+                    .retrieve()
+                    .body(JsonNode.class);
+            String content = response == null ? null : response.at("/choices/0/message/content").asText(null);
+            if (content == null || content.isBlank()) throw new IllegalStateException("多模态模型未返回OCR文字");
+            lastCallStatus = "success";
+            lastFallbackReason = null;
+            return content.strip();
+        } catch (RuntimeException ex) {
+            lastCallStatus = "failed";
+            lastFallbackReason = "OCR模型调用失败: " + ex.getMessage();
+            throw new IllegalStateException(lastFallbackReason, ex);
         }
     }
 
