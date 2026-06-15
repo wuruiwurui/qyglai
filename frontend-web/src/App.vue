@@ -29,18 +29,22 @@
   <main v-else class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <span>企</span>
+        <span><Sparkles :size="20" /></span>
         <div>
-          <strong>QYGL AI</strong>
-          <small>{{ session.user.realName }}</small>
+          <strong>智汇云</strong>
+          <small>企业数字化平台</small>
         </div>
       </div>
 
       <nav class="module-nav" aria-label="业务模块">
-        <button v-for="group in groups" :key="group" :class="{ active: activeGroup === group }" type="button" @click="switchGroup(group)">
-          <component :is="groupIcons[group]" :size="17" />
-          <span>{{ group }}</span>
-        </button>
+        <section v-for="section in activeNavigationSections" :key="section.label" class="nav-section">
+          <p>{{ section.label }}</p>
+          <button v-for="item in section.items" :key="item.group" :class="{ active: activeGroup === item.group }" type="button" @click="switchGroup(item.group)">
+            <component :is="groupIcons[item.group]" :size="17" />
+            <span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
+            <ChevronRight :size="14" />
+          </button>
+        </section>
       </nav>
 
       <section class="sidebar-footer">
@@ -56,13 +60,50 @@
     </aside>
 
     <section class="workspace">
+      <header class="global-header">
+        <nav class="center-navigation" aria-label="业务中心">
+          <button v-for="center in topCenters" :key="center.key" :class="{ active: activeCenter === center.key }" type="button" @click="switchCenter(center.key)">
+            {{ center.label }}
+          </button>
+        </nav>
+        <div class="global-actions">
+          <label class="global-search"><Search :size="16" /><input placeholder="搜索功能、流程、报表..." /></label>
+          <button type="button" title="消息通知"><Bell :size="17" /><em>12</em></button>
+          <button type="button" title="帮助中心"><HelpCircle :size="17" /></button>
+          <button type="button" title="系统设置" @click="switchGroup('系统')"><Settings :size="17" /></button>
+          <div class="user-summary"><span>{{ session.user.realName.slice(0, 1) }}</span><div><strong>{{ session.user.realName }}</strong><small>超级管理员</small></div><ChevronDown :size="14" /></div>
+        </div>
+      </header>
+
       <header class="topbar">
         <div>
-          <p>工作台 / {{ activeGroup }}</p>
+          <p>{{ activeCenterLabel }} / {{ activeGroup }}</p>
           <h1>{{ activeGroup }}</h1>
           <small>{{ pageDescriptions[activeGroup] }}</small>
         </div>
+        <div class="top-actions">
+          <span class="service-chip"><i :class="health?.status === 'UP' ? 'up' : 'down'"></i>{{ health?.status === "UP" ? "服务运行正常" : "服务连接异常" }}</span>
+        </div>
       </header>
+
+      <section v-if="activeGroup === '经营'" class="dashboard-hero">
+        <div>
+          <span>企业流程自动化与 AI 经营助手</span>
+          <h2>让流程、数据与智能决策在一个工作台协同</h2>
+          <p>连接合同、财务、客户服务与知识资产，实时发现风险并推动任务闭环。</p>
+          <div><b>流程自动化</b><b>数据驱动决策</b><b>AI 智能助手</b><b>安全合规可控</b></div>
+        </div>
+        <aside>
+          <span><Bot :size="30" /></span>
+          <div><strong>AI 经营中枢</strong><small>实时连接 {{ modules.length }} 个自动化模块</small></div>
+        </aside>
+      </section>
+
+      <section v-if="activeGroup === '经营'" class="metric-grid dashboard-metrics">
+        <article v-for="(metric, index) in metricCards" :key="metric.name" class="metric-card" :class="[metric.status, `tone-${index + 1}`]">
+          <span>{{ metric.name }}</span><strong>{{ metric.value }}</strong><small>{{ metric.trend }}</small>
+        </article>
+      </section>
 
       <section v-if="activeGroup === '经营'" class="overview-grid">
         <section class="assistant-panel">
@@ -123,16 +164,16 @@
             </form>
           </div>
         </section>
-        <section class="status-panel">
-          <div class="status-line">
-            <ShieldCheck :size="19" />
-            <span>当前用户已通过 JWT 鉴权访问业务接口</span>
+        <section class="status-panel quick-operations">
+          <div class="panel-title"><span class="icon-box"><Play :size="20" /></span><div><h2>快捷操作</h2><p>常用业务入口</p></div></div>
+          <div class="quick-action-grid">
+            <button type="button" @click="switchGroup('流程')"><Route :size="20" /><span>发起流程</span></button>
+            <button type="button" @click="switchGroup('复核')"><ClipboardCheck :size="20" /><span>我的待办</span></button>
+            <button type="button" @click="switchGroup('报表')"><BarChart3 :size="20" /><span>数据报表</span></button>
+            <button type="button" @click="switchGroup('知识库')"><Boxes :size="20" /><span>知识库</span></button>
+            <button type="button" @click="switchGroup('文件')"><FileArchive :size="20" /><span>文件处理</span></button>
+            <button type="button" @click="switchGroup('AI治理')"><Sparkles :size="20" /><span>AI 治理</span></button>
           </div>
-          <dl>
-            <div><dt>模块</dt><dd>{{ modules.length }}</dd></div>
-            <div><dt>复核</dt><dd>{{ reviewTasks.length }}</dd></div>
-            <div><dt>跟进</dt><dd>{{ followups.length }}</dd></div>
-          </dl>
           <p>{{ notice }}</p>
         </section>
       </section>
@@ -162,9 +203,12 @@ import {
   Boxes,
   Cable,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ClipboardCheck,
   FileArchive,
   FileSearch,
+  HelpCircle,
   Landmark,
   Loader2,
   LogIn,
@@ -174,6 +218,7 @@ import {
   Route,
   Search,
   Send,
+  Settings,
   ShieldCheck,
   Sparkles,
   Users,
@@ -212,6 +257,9 @@ import {
 
 type LoadState = "idle" | "loading" | "success" | "error";
 type GroupName = keyof typeof pageDescriptions;
+type CenterKey = "home" | "workflow" | "data" | "application" | "integration" | "management";
+type NavigationItem = { group: GroupName; label: string; description: string };
+type NavigationSection = { label: string; items: NavigationItem[] };
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -249,12 +297,91 @@ const groupIcons: Record<string, Component> = {
   AI治理: Sparkles,
   审计: ShieldCheck
 };
+const topCenters: Array<{ key: CenterKey; label: string }> = [
+  { key: "home", label: "首页" },
+  { key: "workflow", label: "流程中心" },
+  { key: "data", label: "数据中心" },
+  { key: "application", label: "应用中心" },
+  { key: "integration", label: "集成中心" },
+  { key: "management", label: "管理中心" }
+];
+const centerNavigation: Record<CenterKey, NavigationSection[]> = {
+  home: [
+    { label: "工作台", items: [
+      { group: "经营", label: "首页", description: "经营总览与智能助手" },
+      { group: "流程", label: "流程编排", description: "设计和发布审批流程" },
+      { group: "复核", label: "审批中心", description: "处理待办与复核任务" },
+      { group: "报表", label: "经营分析", description: "生成经营报告" },
+      { group: "AI治理", label: "AI 助手", description: "模型配置与效果治理" }
+    ] },
+    { label: "常用应用", items: [
+      { group: "销售", label: "销售", description: "客户跟进任务" },
+      { group: "财务", label: "财务", description: "票据与对账" },
+      { group: "知识库", label: "知识库", description: "企业知识问答" }
+    ] }
+  ],
+  workflow: [
+    { label: "流程设计", items: [
+      { group: "流程", label: "流程编排", description: "拖拽式流程设计" },
+      { group: "合同", label: "合同审批", description: "合同风险与履约审批" },
+      { group: "财务", label: "财务审批", description: "票据与对账审批" }
+    ] },
+    { label: "任务处理", items: [
+      { group: "复核", label: "审批中心", description: "待办、已办与复核" },
+      { group: "审计", label: "流程轨迹", description: "审批操作审计" }
+    ] }
+  ],
+  data: [
+    { label: "数据分析", items: [
+      { group: "经营", label: "经营驾驶舱", description: "关键指标总览" },
+      { group: "报表", label: "数据报表", description: "日报周报与汇总" },
+      { group: "审计", label: "审计分析", description: "合规操作轨迹" }
+    ] },
+    { label: "数据资产", items: [
+      { group: "文件", label: "文件中心", description: "文档解析与抽取" },
+      { group: "知识库", label: "知识资产", description: "文档索引与语义检索" }
+    ] }
+  ],
+  application: [
+    { label: "业务应用", items: [
+      { group: "销售", label: "销售管理", description: "商机与跟进提醒" },
+      { group: "财务", label: "财务管理", description: "发票与对账处理" },
+      { group: "客服", label: "客户服务", description: "工单分类与处置" },
+      { group: "合同", label: "合同管理", description: "合同台账与风险" }
+    ] },
+    { label: "协同应用", items: [
+      { group: "消息", label: "消息中心", description: "业务通知与提醒" },
+      { group: "知识库", label: "知识库", description: "企业知识问答" }
+    ] }
+  ],
+  integration: [
+    { label: "连接管理", items: [
+      { group: "集成", label: "集成中心", description: "连接器与 Webhook" },
+      { group: "消息", label: "消息触达", description: "通知任务与状态" }
+    ] },
+    { label: "智能服务", items: [
+      { group: "AI治理", label: "模型服务", description: "模型与路由配置" },
+      { group: "文件", label: "文档服务", description: "OCR 与结构化抽取" }
+    ] }
+  ],
+  management: [
+    { label: "组织管理", items: [
+      { group: "系统", label: "系统管理", description: "组织、用户与权限" },
+      { group: "审计", label: "安全审计", description: "操作日志与追踪" }
+    ] },
+    { label: "智能治理", items: [
+      { group: "AI治理", label: "AI 治理", description: "模型、评估与健康检查" },
+      { group: "知识库", label: "知识治理", description: "空间与向量索引" }
+    ] }
+  ]
+};
 
 const session = ref<LoginResponse | null>(getStoredSession());
 const loginForm = ref({ username: "admin", password: "123456" });
 const loginState = ref<LoadState>("idle");
 const loginMessage = ref("默认账号：admin / 123456");
 const activeGroup = ref<GroupName>("经营");
+const activeCenter = ref<CenterKey>("home");
 const selectedEndpoint = ref<EndpointSpec | null>(null);
 const actionPayload = ref<DataRecord>({});
 const records = ref<DataRecord[]>([]);
@@ -292,6 +419,10 @@ const chatMessages = ref<ChatMessage[]>([
 ]);
 
 const activeEndpoints = computed(() => endpointCatalog.filter((item) => item.group === activeGroup.value));
+const activeCenterLabel = computed(() => topCenters.find((center) => center.key === activeCenter.value)?.label ?? "首页");
+const activeNavigationSections = computed(() => centerNavigation[activeCenter.value]
+  .map(section => ({ ...section, items: section.items.filter(item => groups.value.includes(item.group)) }))
+  .filter(section => section.items.length));
 const isFileGroup = computed(() => activeGroup.value === "\u6587\u4ef6");
 const isAiGovernanceGroup = computed(() => activeGroup.value === "\u0041\u0049\u6cbb\u7406");
 const isSystemGroup = computed(() => activeGroup.value === "\u7cfb\u7edf");
@@ -362,6 +493,14 @@ function switchGroup(group: GroupName) {
   records.value = [];
   lastResult.value = null;
   selectEndpoint(endpointCatalog.find((item) => item.group === group && item.primary) ?? activeEndpoints.value[0]);
+}
+
+function switchCenter(center: CenterKey) {
+  activeCenter.value = center;
+  const first = activeNavigationSections.value[0]?.items[0]?.group;
+  if (first && !activeNavigationSections.value.some(section => section.items.some(item => item.group === activeGroup.value))) {
+    switchGroup(first);
+  }
 }
 
 function handleFileJump(target: "contract" | "invoice" | "review" | "workflow", id: string) {

@@ -1,41 +1,33 @@
-# Frontend Redesign QA
+# Product Design QA
 
-- Source visual truth: `E:\xm\qyglai\design-reference\current-workspace.png`
-- Implementation screenshots:
-  - `E:\xm\qyglai\design-reference\redesigned-contracts.png`
-  - `E:\xm\qyglai\design-reference\redesigned-detail-drawer.png`
-  - `E:\xm\qyglai\design-reference\redesigned-files.png`
-  - `E:\xm\qyglai\design-reference\redesigned-knowledge.png`
-  - `E:\xm\qyglai\design-reference\redesigned-mobile-final.png`
-- Desktop viewport: 1440 x 1024
-- Mobile viewport: 390 x 844
-- State: authenticated admin, live backend data
+- Source visual truth: `C:/Users/wurui/Downloads/ChatGPT Image 2026年6月15日 14_10_34.png`
+- Implementation screenshot: `E:/xm/qyglai/docs/ui/redesign-home-20260615.png`
+- Full-view comparison: `E:/xm/qyglai/docs/ui/redesign-comparison-20260615.png`
+- Focused comparison: `E:/xm/qyglai/docs/ui/redesign-focus-comparison-20260615.png`
+- Viewport: desktop, approximately 1680 x 945
+- State: authenticated home dashboard
 
-## Full-View Comparison
+## Full-view comparison evidence
 
-The redesign removes the API-debugger layout and replaces it with a compact business workspace. Navigation, page title, metrics, tabs, list, search, pagination, and details now have a clear reading order. The contract screen demonstrates the primary list workflow; the file and knowledge screens demonstrate specialized workbenches.
+The implementation matches the reference's white-blue enterprise shell, fixed light sidebar, top business-center navigation, compact cards, subtle shadows, blue active states, dense dashboard layout, and right-side quick action area. Existing product data and workflows replace the reference's example charts and approval records.
 
-## Focused Comparison
+## Focused region comparison evidence
 
-The detail experience was checked separately in `redesigned-detail-drawer.png`. The drawer keeps the list context visible, uses Chinese field labels, and hides internal control fields. Mobile navigation was checked separately in `redesigned-mobile-final.png`.
+The focused header and first-screen comparison confirms matching navigation hierarchy, compact typography, restrained blue palette, border treatment, active indicators, sidebar density, and dashboard card rhythm. Separate browser checks covered AI governance, workflow center, knowledge base, and mobile layout.
 
 ## Findings
 
-- No remaining P0, P1, or P2 layout findings.
-- Typography uses a restrained product scale suitable for a dense enterprise console.
-- Spacing and borders consistently separate navigation, actions, lists, and details.
-- Semantic colors remain readable and are not used as the only status signal.
-- Lucide icons are preserved; no placeholder visual assets were introduced.
-- Business copy replaces technical interface terminology in the primary workflow.
+- No actionable P0, P1, or P2 findings remain.
+- P3: The reference uses a richer custom AI illustration and more analytical charts. The implementation intentionally keeps the existing live business modules and avoids adding non-functional decorative dashboard widgets.
+- P3: A few existing database records contain legacy English or malformed text; this is data cleanup rather than a layout defect.
 
-## Patches Made
+## Patches made
 
-- Removed endpoint counts, service-check button, duplicate page refresh, API return JSON, and inline JSON detail.
-- Added compact business tabs, list toolbar, row-selected state, and right-side detail drawer.
-- Added Chinese labels for common contract date and term fields.
-- Hid internal fields from the business detail drawer.
-- Reduced mobile navigation from a full-height menu to a horizontal module strip.
+- Replaced the single-level module navigation with top-level business centers and contextual grouped side navigation.
+- Unified global colors, typography, cards, forms, tables, drawers, chat surfaces, workflow surfaces, and responsive behavior.
+- Corrected AI model banner contrast and removed remaining green workflow accents.
+- Hid horizontal navigation scrollbars while preserving mobile scrolling.
 
-## Final Result
+## Final result
 
 final result: passed

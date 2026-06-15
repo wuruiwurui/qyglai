@@ -18,35 +18,53 @@
 
 ## 功能截图
 
-### 老板智能经营助手
+### 企业经营首页
 
-通过连续对话查询销售、财务、客服、合同、复核和报表等真实经营数据。
+顶部按首页、流程中心、数据中心、应用中心、集成中心和管理中心划分业务域；左侧根据当前业务中心展示分组菜单与功能入口。首页集成老板经营问答、关键指标、快捷操作和业务数据视图。
 
-![老板智能经营助手](docs/screenshots/01-dashboard.png)
+![企业经营首页](docs/screenshots/01-dashboard-new.jpg)
 
-### 文件 AI 处理闭环
+### 审批流程中心
 
-上传合同、发票等文件后，完成文本解析、模型字段抽取、业务入库、人工复核和审批发起。
+集中查看审批待办、运行中流程、已通过实例和流程模板，支持快速发起与处理业务审批。
 
-![文件 AI 处理闭环](docs/screenshots/02-file-processing.png)
-
-### 企业知识库 RAG
-
-提供知识空间、连续问答、文档上传、Java 向量索引和引用来源展示。
-
-![企业知识库 RAG](docs/screenshots/03-knowledge-base.png)
+![审批流程中心](docs/screenshots/02-workflow-center-new.jpg)
 
 ### 可拖拽审批流程
 
 通过拖拽编排人工审批、部门审批、财务审批和可自动执行的 AI 复核节点。
 
-![可拖拽审批流程](docs/screenshots/04-workflow-designer.png)
+![可拖拽审批流程](docs/screenshots/03-workflow-designer-new.jpg)
+
+### 企业知识库 RAG
+
+提供知识空间、对话式知识问答、文档上传、真实 Embedding、Milvus 向量索引和引用来源展示。
+
+![企业知识库 RAG](docs/screenshots/04-knowledge-base-new.jpg)
 
 ### 多模型 AI 治理
 
-支持维护多个真实模型、动态切换当前模型，并查看模型运行状态与调用日志。
+支持维护多个真实模型、动态切换当前模型、配置场景路由与备用模型，并查看模型状态、效果评估和调用日志。
 
-![多模型 AI 治理](docs/screenshots/05-ai-governance.png)
+![多模型 AI 治理](docs/screenshots/05-ai-governance-new.jpg)
+
+### 文件 AI 处理闭环
+
+上传合同、发票、图片或扫描 PDF 后，完成 OCR、文本解析、模型字段抽取、业务入库、人工复核和审批发起。
+
+![文件 AI 处理闭环](docs/screenshots/06-file-processing-new.jpg)
+
+### 企业权限管理
+
+提供组织、用户、角色、权限资源和安全审计管理，支撑完整 RBAC 权限控制。
+
+![企业权限管理](docs/screenshots/07-permission-management-new.jpg)
+
+### 业务专属工作台
+
+销售、财务、客服、合同等业务模块拥有独立工作台，并与 AI 建议、提醒和业务闭环协同。
+
+![业务专属工作台](docs/screenshots/08-business-workbench-new.jpg)
 
 ## 最近完成功能
 
@@ -153,6 +171,8 @@
 
 ### 前端专属工作台
 
+- 前端已参考白蓝企业数字化平台重新设计，统一顶部业务中心、左侧分组菜单、业务工作台、列表、详情抽屉、表单与对话页面的视觉语言。
+- 顶部菜单按首页、流程中心、数据中心、应用中心、集成中心和管理中心划分；左侧根据当前中心展示二级业务分组和三级功能入口，并继续应用 RBAC 权限过滤。
 - 老板经营助手使用连续对话界面。
 - 文件、AI 治理、权限管理、审批流程和知识库均拥有专属页面。
 - 各业务字段使用中文标签展示。
