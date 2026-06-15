@@ -33,6 +33,7 @@ public class AiBusinessApplicationService {
     }
 
     public TicketDecision classifyTicket(String content) {
+        // 先准备稳定的本地默认结果，真实模型不可用时工单仍可正常创建和分派。
         TicketDecision fallback = new TicketDecision("其他咨询", "P2", "neutral", "客服主管",
                 0.60, "您好，已收到您的问题，我们会尽快核实并反馈处理进展。", false);
         String input = value(content);
@@ -52,6 +53,7 @@ public class AiBusinessApplicationService {
 
     public ReconciliationDecision explainReconciliation(String supplierName, BigDecimal expected,
                                                         BigDecimal actual, BigDecimal difference) {
+        // 差异金额与匹配状态由 Java 确定性计算，模型只能解释原因和给出建议。
         String status = difference.signum() == 0 ? "matched" : "difference";
         ReconciliationDecision fallback = new ReconciliationDecision(status,
                 difference.signum() == 0 ? "金额一致，可进入后续归档流程。" : "应有金额与实际金额存在差异，需要人工核对。",
@@ -70,6 +72,7 @@ public class AiBusinessApplicationService {
     }
 
     public ReviewDecision adviseReview(String scenario, String content, String riskLevel) {
+        // 模型仅生成复核清单，最终审批决定必须由工作流或人工操作完成。
         boolean highRisk = "high".equalsIgnoreCase(riskLevel);
         ReviewDecision fallback = new ReviewDecision(highRisk ? "need_review" : "manual_confirm",
                 highRisk ? List.of("业务风险等级较高") : List.of("需要人工确认业务字段"),
@@ -86,6 +89,7 @@ public class AiBusinessApplicationService {
     }
 
     public ReportContent generateReport(ReportGenerateRequest request) {
+        // 先查询真实业务数据形成上下文，再交给模型生成可读报告，避免模型自行编造数字。
         Map<String, Object> context = bossBusinessContextService.buildContext(
                 new BossChatRequest("生成企业经营" + request.reportType(), request.timeRange(), null, Map.of()));
         ReportContent fallback = new ReportContent(String.valueOf(context.getOrDefault("summary", "暂无可汇总数据。")),
@@ -108,6 +112,7 @@ public class AiBusinessApplicationService {
         long start = System.currentTimeMillis();
         JsonNode node = modelGateway.generateJson(scenario, systemPrompt, input);
         boolean success = node != null && "success".equals(modelGateway.status().lastCallStatus());
+        // 无论成功或降级都记录调用日志，AI 治理页面可据此统计成功率、耗时和失败原因。
         callLogService.record(scenario, businessType, businessId,
                 success ? modelGateway.status().model() : "fallback-local-rule", promptCode,
                 input, node == null ? "" : node.toString(), start, success,

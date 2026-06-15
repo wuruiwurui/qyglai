@@ -110,6 +110,7 @@ public class SystemManagementService {
     }
 
     public SysOrgEntity saveOrg(Long id, SystemOrgSaveRequest request) {
+        // id 为空表示新增，否则加载原记录进行更新，统一复用页面保存接口。
         SysOrgEntity org = id == null ? new SysOrgEntity() : requireOrg(id);
         org.setParentId(request.parentId() == null ? 0L : request.parentId());
         org.setOrgCode(request.orgCode());
@@ -130,6 +131,7 @@ public class SystemManagementService {
         return org;
     }
 
+    /** 新增或更新用户；仅在请求明确携带密码时覆盖已有密码散列。 */
     public SysUserEntity saveUser(Long id, SystemUserSaveRequest request) {
         SysUserEntity user = id == null ? new SysUserEntity() : requireUser(id);
         user.setOrgId(request.orgId());
@@ -139,6 +141,7 @@ public class SystemManagementService {
         user.setEmail(request.email());
         user.setStatus(defaultValue(request.status(), "enabled"));
         if (request.password() != null && !request.password().isBlank()) {
+            // 数据库只保存不可逆密码散列，绝不保存页面提交的明文密码。
             user.setPasswordHash(passwordEncoder.encode(request.password()));
         }
         if (id == null) {
@@ -155,6 +158,7 @@ public class SystemManagementService {
         return user;
     }
 
+    /** 新增或更新角色，dataScope 用于约束角色可访问的数据范围。 */
     public SysRoleEntity saveRole(Long id, SystemRoleSaveRequest request) {
         SysRoleEntity role = id == null ? new SysRoleEntity() : requireRole(id);
         role.setRoleCode(request.roleCode());
@@ -174,6 +178,7 @@ public class SystemManagementService {
         return role;
     }
 
+    /** 新增或更新菜单、按钮或 API 权限资源。 */
     public SysPermissionEntity savePermission(Long id, SystemPermissionSaveRequest request) {
         SysPermissionEntity permission = id == null ? new SysPermissionEntity() : requirePermission(id);
         permission.setPermissionCode(request.permissionCode());
@@ -199,6 +204,7 @@ public class SystemManagementService {
     @Transactional(rollbackFor = Exception.class)
     public List<Long> assignUserRoles(Long userId, List<Long> roleIds) {
         requireUser(userId);
+        // 采用“先清理、后重建”保证最终角色集合与页面提交内容完全一致。
         userRoleMapper.delete(new LambdaQueryWrapper<SysUserRoleEntity>().eq(SysUserRoleEntity::getUserId, userId));
         for (Long roleId : roleIds) {
             requireRole(roleId);
@@ -221,6 +227,7 @@ public class SystemManagementService {
     @Transactional(rollbackFor = Exception.class)
     public List<Long> assignRolePermissions(Long roleId, List<Long> permissionIds) {
         requireRole(roleId);
+        // 整体替换角色权限关系，并通过事务避免只保存部分权限。
         rolePermissionMapper.delete(new LambdaQueryWrapper<SysRolePermissionEntity>().eq(SysRolePermissionEntity::getRoleId, roleId));
         for (Long permissionId : permissionIds) {
             requirePermission(permissionId);

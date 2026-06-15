@@ -1,7 +1,7 @@
 package com.qyglai.automation.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.qyglai.automation.config.AutomationProperties;
+import com.qyglai.automation.dto.AiEmbeddingConfig;
 import com.qyglai.automation.dto.KnowledgeVectorStatus;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -17,19 +17,21 @@ import org.springframework.web.client.RestClient;
 @Service
 public class MilvusVectorStoreService {
 
-    private final AutomationProperties.VectorStore properties;
+    private final AiEmbeddingConfigService configService;
 
-    public MilvusVectorStoreService(AutomationProperties automationProperties) {
-        this.properties = automationProperties.getVectorStore();
+    public MilvusVectorStoreService(AiEmbeddingConfigService configService) {
+        this.configService = configService;
     }
 
     /** 确保知识库集合已经创建。 */
     public void ensureCollection() {
-        JsonNode describe = post("/v2/vectordb/collections/describe", Map.of("collectionName", properties.getCollection()));
+        AiEmbeddingConfig config = configService.getConfig();
+        // 每次写入和检索前轻量检查集合，首次使用时自动创建，无需人工初始化。
+        JsonNode describe = post(config, "/v2/vectordb/collections/describe", Map.of("collectionName", config.collection()));
         if (describe.path("code").asInt(-1) == 0) return;
-        JsonNode created = post("/v2/vectordb/collections/create", Map.of(
-                "collectionName", properties.getCollection(),
-                "dimension", properties.getDimension(),
+        JsonNode created = post(config, "/v2/vectordb/collections/create", Map.of(
+                "collectionName", config.collection(),
+                "dimension", config.dimension(),
                 "metricType", "COSINE"));
         requireSuccess(created, "创建Milvus知识向量集合失败");
     }
@@ -37,8 +39,9 @@ public class MilvusVectorStoreService {
     /** 写入或更新知识切片向量和检索所需动态字段。 */
     public void upsert(long chunkId, long documentId, long spaceId, List<Double> vector) {
         ensureCollection();
-        JsonNode response = post("/v2/vectordb/entities/upsert", Map.of(
-                "collectionName", properties.getCollection(),
+        AiEmbeddingConfig config = configService.getConfig();
+        JsonNode response = post(config, "/v2/vectordb/entities/upsert", Map.of(
+                "collectionName", config.collection(),
                 "data", List.of(Map.of(
                         "id", String.valueOf(chunkId),
                         "document_id", String.valueOf(documentId),
@@ -49,7 +52,9 @@ public class MilvusVectorStoreService {
 
     /** 删除并重新创建知识向量集合，用于完整重建和维度迁移。 */
     public void recreateCollection() {
-        JsonNode dropped = post("/v2/vectordb/collections/drop", Map.of("collectionName", properties.getCollection()));
+        AiEmbeddingConfig config = configService.getConfig();
+        // Embedding 模型或维度变化后旧集合不可继续复用，因此先删除再按新配置创建。
+        JsonNode dropped = post(config, "/v2/vectordb/collections/drop", Map.of("collectionName", config.collection()));
         if (dropped != null && dropped.path("code").asInt(-1) != 0
                 && !dropped.path("message").asText("").toLowerCase().contains("not found")) {
             requireSuccess(dropped, "删除旧Milvus知识向量集合失败");
@@ -60,8 +65,10 @@ public class MilvusVectorStoreService {
     /** 执行COSINE Top-K向量检索，返回切片ID与相似度。 */
     public List<VectorHit> search(List<Double> vector, int limit) {
         ensureCollection();
-        JsonNode response = post("/v2/vectordb/entities/search", Map.of(
-                "collectionName", properties.getCollection(),
+        AiEmbeddingConfig config = configService.getConfig();
+        // 仅返回关联业务所需字段，正文和权限信息继续从 MySQL 获取。
+        JsonNode response = post(config, "/v2/vectordb/entities/search", Map.of(
+                "collectionName", config.collection(),
                 "data", List.of(vector),
                 "annsField", "vector",
                 "limit", limit,
@@ -76,26 +83,29 @@ public class MilvusVectorStoreService {
     /** 返回当前真实向量链路状态。 */
     public KnowledgeVectorStatus status() {
         try {
+            AiEmbeddingConfig config = configService.getConfig();
             ensureCollection();
-            return new KnowledgeVectorStatus(properties.isEnabled(), properties.getEmbeddingModel(),
-                    properties.getDimension(), properties.getMilvusUrl(), properties.getCollection(),
+            return new KnowledgeVectorStatus(config.enabled(), config.model(),
+                    config.dimension(), config.milvusUrl(), config.collection(),
                     true, "豆包Embedding与Milvus向量检索已就绪");
         } catch (Exception exception) {
-            return new KnowledgeVectorStatus(properties.isEnabled(), properties.getEmbeddingModel(),
-                    properties.getDimension(), properties.getMilvusUrl(), properties.getCollection(),
+            AiEmbeddingConfig config = configService.getConfig();
+            return new KnowledgeVectorStatus(config.enabled(), config.model(),
+                    config.dimension(), config.milvusUrl(), config.collection(),
                     false, exception.getMessage());
         }
     }
 
-    private JsonNode post(String path, Object body) {
-        return client().post().uri(path).body(body).retrieve().body(JsonNode.class);
+    private JsonNode post(AiEmbeddingConfig config, String path, Object body) {
+        return client(config).post().uri(path).body(body).retrieve().body(JsonNode.class);
     }
 
-    private RestClient client() {
+    /** 创建访问 Milvus REST API 的短超时客户端，故障时尽快触发知识库本地降级检索。 */
+    private RestClient client(AiEmbeddingConfig config) {
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(5));
         factory.setReadTimeout(Duration.ofSeconds(20));
-        return RestClient.builder().baseUrl(properties.getMilvusUrl().replaceAll("/+$", ""))
+        return RestClient.builder().baseUrl(config.milvusUrl().replaceAll("/+$", ""))
                 .requestFactory(factory).build();
     }
 

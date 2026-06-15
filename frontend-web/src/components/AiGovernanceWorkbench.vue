@@ -74,6 +74,43 @@
       </section>
     </section>
 
+    <section class="ai-embedding-panel">
+      <div class="file-section-head">
+        <div><p>知识库语义检索</p><h2>Embedding 模型与 Milvus 配置</h2></div>
+        <span class="status-chip" :class="{ healthy: embeddingStatus?.milvusHealthy }">{{ embeddingStatus?.milvusHealthy ? "真实向量链路正常" : "等待连接测试" }}</span>
+      </div>
+      <div class="ai-embedding-layout">
+        <form class="ai-embedding-form" @submit.prevent="submitEmbeddingConfig">
+          <label><span>供应商</span><select v-model="embeddingConfig.provider"><option value="doubao">豆包</option><option value="openai">OpenAI兼容</option><option value="local">本地服务</option></select></label>
+          <label><span>Embedding 接入点 ID</span><input v-model="embeddingConfig.model" required placeholder="ep-xxxxxxxx" /></label>
+          <label class="wide"><span>Embedding API 地址</span><input v-model="embeddingConfig.apiUrl" required placeholder="https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal" /></label>
+          <label><span>API Key</span><input v-model="embeddingConfig.apiKey" autocomplete="off" placeholder="留空保留原密钥" /><small>当前密钥：{{ embeddingConfig.apiKeyMasked ?? "未配置" }}</small></label>
+          <label><span>向量维度</span><input v-model.number="embeddingConfig.dimension" type="number" min="1" required /></label>
+          <label><span>Milvus 地址</span><input v-model="embeddingConfig.milvusUrl" required placeholder="http://localhost:19530" /></label>
+          <label><span>Milvus 集合</span><input v-model="embeddingConfig.collection" required placeholder="qyglai_knowledge_chunks" /></label>
+          <label class="ai-embedding-switch wide"><input v-model="embeddingConfig.enabled" type="checkbox" /><span>启用真实 Embedding 与 Milvus 检索</span></label>
+          <footer class="wide">
+            <span>{{ embeddingNotice }}</span>
+            <div>
+              <button class="ghost-button" type="button" :disabled="embeddingBusy" @click="testEmbedding"><TestTube2 :size="15" />连接测试</button>
+              <button class="primary-button" type="submit" :disabled="embeddingBusy"><Save :size="15" />保存配置</button>
+            </div>
+          </footer>
+        </form>
+        <section class="ai-embedding-log">
+          <header><div><strong>Embedding 调用日志</strong><small>知识入库、问题检索和连接测试均会记录</small></div><span>{{ embeddingLogs.length }} 条</span></header>
+          <div>
+            <article v-for="log in embeddingLogs.slice(0, 12)" :key="log.id">
+              <span :class="log.successFlag === 1 ? 'ok' : 'bad'"><Database :size="14" /></span>
+              <div><strong>{{ log.modelName }}</strong><small>{{ log.promptTemplateCode }} · {{ formatTime(log.createdAt) }}</small><em v-if="log.errorMessage">{{ log.errorMessage }}</em></div>
+              <aside><b>{{ log.latencyMs ?? 0 }}ms</b><small>{{ log.successFlag === 1 ? "成功" : "失败" }}</small></aside>
+            </article>
+            <div v-if="!embeddingLogs.length" class="file-empty">暂无 Embedding 调用日志</div>
+          </div>
+        </section>
+      </div>
+    </section>
+
     <section class="ai-health-panel">
       <div class="file-section-head">
         <div><p>自动路由依据</p><h2>模型连接健康检查</h2></div>
@@ -222,11 +259,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Activity, CheckCircle2, Cpu, Gauge, GitCompare, HeartPulse, Lightbulb, Loader2, PencilLine, Plus, Route, Save, Trash2 } from "lucide-vue-next";
+import { Activity, CheckCircle2, Cpu, Database, Gauge, GitCompare, HeartPulse, Lightbulb, Loader2, PencilLine, Plus, Route, Save, TestTube2, Trash2 } from "lucide-vue-next";
 import {
-  checkAllAiModelHealth, deleteAiModelProfile, deleteAiScenarioRoute, fetchAiEvaluationDashboard, fetchAiModelCallLogs, fetchAiModelHealth, fetchAiModelProfiles,
+  checkAllAiModelHealth, deleteAiModelProfile, deleteAiScenarioRoute, fetchAiEmbeddingConfig, fetchAiEmbeddingLogs, fetchAiEvaluationDashboard, fetchAiModelCallLogs, fetchAiModelHealth, fetchAiModelProfiles,
   fetchAiRuntimeStatus, fetchAiScenarioRoutes, saveAiModelProfile, saveAiScenarioRoute, switchAiModelProfile,
-  type AiEvaluationDashboard, type AiModelCallLog, type AiModelHealthStatus, type AiModelProfile, type AiRuntimeStatus, type AiScenarioRoute
+  saveAiEmbeddingConfig, testAiEmbeddingConfig, type AiEmbeddingConfig, type AiEvaluationDashboard, type AiModelCallLog,
+  type AiModelHealthStatus, type AiModelProfile, type AiRuntimeStatus, type AiScenarioRoute, type KnowledgeVectorStatus
 } from "../services/api";
 
 type LoadState = "idle" | "loading" | "success" | "error";
@@ -238,6 +276,14 @@ const evaluationDays = ref(30);
 const routes = ref<AiScenarioRoute[]>([]);
 const healthStatuses = ref<AiModelHealthStatus[]>([]);
 const healthChecking = ref(false);
+const embeddingLogs = ref<AiModelCallLog[]>([]);
+const embeddingStatus = ref<KnowledgeVectorStatus | null>(null);
+const embeddingBusy = ref(false);
+const embeddingNotice = ref("配置保存在MySQL中，保存后下一次知识检索立即生效");
+const embeddingConfig = ref<AiEmbeddingConfig>({
+  enabled: true, provider: "doubao", apiUrl: "", apiKey: "", model: "", dimension: 2048,
+  milvusUrl: "http://localhost:19530", collection: "qyglai_knowledge_chunks"
+});
 const state = ref<LoadState>("idle");
 const notice = ref("模型切换后，下一次真实模型调用立即生效");
 const emptyProfile = (): AiModelProfile => ({
@@ -263,9 +309,9 @@ onMounted(loadAll);
 async function loadAll() {
   state.value = "loading";
   try {
-    [profiles.value, status.value, logs.value, evaluation.value, routes.value, healthStatuses.value] = await Promise.all([
+    [profiles.value, status.value, logs.value, evaluation.value, routes.value, healthStatuses.value, embeddingConfig.value, embeddingLogs.value] = await Promise.all([
       fetchAiModelProfiles(), fetchAiRuntimeStatus(), fetchAiModelCallLogs(), fetchAiEvaluationDashboard(evaluationDays.value),
-      fetchAiScenarioRoutes(), fetchAiModelHealth()
+      fetchAiScenarioRoutes(), fetchAiModelHealth(), fetchAiEmbeddingConfig(), fetchAiEmbeddingLogs()
     ]);
     const selected = profiles.value.find((item) => item.id === config.value.id) ?? currentProfile.value ?? profiles.value[0];
     config.value = selected ? { ...selected, apiKey: "" } : emptyProfile();
@@ -273,6 +319,25 @@ async function loadAll() {
     notice.value = "已加载模型配置";
     state.value = "success";
   } catch (error) { fail(error, "模型配置加载失败"); }
+}
+
+async function submitEmbeddingConfig() {
+  embeddingBusy.value = true;
+  try {
+    embeddingConfig.value = { ...(await saveAiEmbeddingConfig(embeddingConfig.value)), apiKey: "" };
+    embeddingNotice.value = "Embedding与Milvus配置已保存并立即生效";
+  } catch (error) { embeddingNotice.value = error instanceof Error ? error.message : "Embedding配置保存失败"; }
+  finally { embeddingBusy.value = false; }
+}
+
+async function testEmbedding() {
+  embeddingBusy.value = true;
+  try {
+    embeddingStatus.value = await testAiEmbeddingConfig();
+    embeddingLogs.value = await fetchAiEmbeddingLogs();
+    embeddingNotice.value = embeddingStatus.value.message;
+  } catch (error) { embeddingNotice.value = error instanceof Error ? error.message : "Embedding连接测试失败"; }
+  finally { embeddingBusy.value = false; }
 }
 
 async function checkAllHealth() {

@@ -49,12 +49,14 @@ public class JavaAiModelGateway {
      * 按场景路由调用模型并解析 JSON，主模型返回无效 JSON 时继续尝试备用模型。
      */
     public JsonNode generateJson(String scenario, String systemPrompt, String userPrompt) {
+        // 路由服务会返回“主模型 + 备用模型”，健康模型优先，异常模型自动后移。
         List<AiRuntimeConfig> configs = healthService.orderByHealth(configService.resolveConfigs(scenario));
         String firstModel = firstModel(configs);
         String lastError = null;
         for (AiRuntimeConfig config : configs) {
             try {
                 String content = callText(config, systemPrompt, userPrompt);
+                // 模型有时会额外包裹 Markdown JSON 代码块，解析前统一剥离。
                 String cleaned = content.trim().replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "");
                 JsonNode node = objectMapper.readTree(cleaned);
                 if (!node.isObject()) throw new IllegalStateException("模型返回内容不是JSON对象");
@@ -82,6 +84,7 @@ public class JavaAiModelGateway {
         String lastError = null;
         for (AiRuntimeConfig config : configs) {
             try {
+                // 任一模型成功即结束路由；markSuccess 会记录是否发生了备用模型切换。
                 String content = callText(config, systemPrompt, userPrompt);
                 markSuccess(firstModel, config.model());
                 return content;
@@ -91,6 +94,7 @@ public class JavaAiModelGateway {
         }
         lastCallStatus = "fallback";
         lastFallbackReason = lastError == null ? "场景未配置可用真实模型" : "全部路由模型调用失败: " + lastError;
+        // 文本场景允许返回业务方传入的确定性兜底结果，避免外部模型故障阻断主流程。
         return fallback;
     }
 
@@ -126,6 +130,7 @@ public class JavaAiModelGateway {
 
     private String callText(AiRuntimeConfig config, String systemPrompt, String userPrompt) {
         validate(config, true);
+        // 豆包兼容 OpenAI Chat Completions 协议，因此所有文本模型统一通过该结构调用。
         JsonNode response = client(config).post().uri("/chat/completions")
                 .body(Map.of(
                         "model", config.model(),
@@ -141,6 +146,7 @@ public class JavaAiModelGateway {
 
     private String callVision(AiRuntimeConfig config, String prompt, byte[] imageBytes, String mimeType) {
         validate(config, false);
+        // 图片转为 data URL 后与提示词一起提交，避免依赖外部可访问的临时图片地址。
         String dataUrl = "data:" + mimeType + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
         JsonNode response = client(config).post().uri("/chat/completions")
                 .body(Map.of(
@@ -165,6 +171,9 @@ public class JavaAiModelGateway {
                 .requestFactory(factory).defaultHeader("Authorization", "Bearer " + config.apiKey()).build();
     }
 
+    /**
+     * 在发起网络请求前检查模型开关、密钥、地址及文本生成能力。
+     */
     private void validate(AiRuntimeConfig config, boolean requireTextGeneration) {
         if (!config.enabled() || config.apiKey() == null || config.apiBase() == null
                 || "mock".equalsIgnoreCase(config.provider())
@@ -178,6 +187,7 @@ public class JavaAiModelGateway {
     }
 
     private void markSuccess(String firstModel, String usedModel) {
+        // 保留实际使用的模型，供 AI 治理页面展示路由切换结果。
         lastUsedModel = usedModel;
         lastCallStatus = "success";
         lastFallbackReason = firstModel != null && !firstModel.equals(usedModel)

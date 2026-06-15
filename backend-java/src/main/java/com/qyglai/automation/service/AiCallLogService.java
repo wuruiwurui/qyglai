@@ -7,6 +7,8 @@ import java.time.LocalDateTime;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.qyglai.automation.entity.AiModelCallLogEntity;
 import com.qyglai.automation.mapper.AiModelCallLogMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
@@ -62,6 +64,14 @@ public class AiCallLogService {
         } catch (RuntimeException ignored) {
             // 调用日志失败不能影响主业务流程。
         }
+    }
+
+    /** 查询Embedding专属调用日志。 */
+    public List<AiModelCallLogEntity> listEmbeddingLogs() {
+        return mapper.selectList(new LambdaQueryWrapper<AiModelCallLogEntity>()
+                .eq(AiModelCallLogEntity::getScenario, "knowledge_embedding")
+                .orderByDesc(AiModelCallLogEntity::getCreatedAt)
+                .last("LIMIT 100"));
     }
 
     private int estimateTokens(String text) {

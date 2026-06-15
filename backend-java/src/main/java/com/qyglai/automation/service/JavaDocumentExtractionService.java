@@ -29,11 +29,15 @@ public class JavaDocumentExtractionService {
         this.configService = configService;
     }
 
+    /**
+     * 先使用确定性规则提取关键字段，再根据页面配置决定是否调用模型并合并结果。
+     */
     public ExtractionResult extract(String rawText, String requestedScenario) {
         String scenario = detectScenario(rawText, requestedScenario);
         ExtractionResult rules = ruleExtraction(rawText, scenario);
         AiRuntimeConfig config = configService.getConfig();
         if ("rules_only".equals(config.fileExtractionMode())) return rules;
+        // 模型负责补充规则难以稳定识别的字段；提示词明确约束金额不得误取发票号或订单号。
         JsonNode node = modelGateway.generateJson("file_parse_extract",
                 "你是企业发票和合同结构化抽取引擎。必须忠于原文，只输出合法JSON，不输出Markdown。金额不得使用发票号、订单号、航班号。",
                 "场景：" + scenario + "\n原文：\n" + limit(rawText, 24000)
@@ -46,6 +50,7 @@ public class JavaDocumentExtractionService {
         Map<String, String> modelFields = new LinkedHashMap<>();
         node.path("fields").fields().forEachRemaining(entry -> modelFields.put(entry.getKey(), entry.getValue().asText("")));
         Map<String, String> merged = new LinkedHashMap<>();
+        // model_first 表示模型结果覆盖规则结果；其他模式下规则结果拥有最终优先级。
         if ("model_first".equals(config.fileExtractionMode())) {
             merged.putAll(rules.fields());
             merged.putAll(modelFields);
@@ -54,6 +59,7 @@ public class JavaDocumentExtractionService {
             merged.putAll(rules.fields());
         }
         if (blank(merged.get("amount"))) merged.put("amount", first(merged.get("total_amount"), rules.fields().get("amount"), "0"));
+        // 风险项采用并集，避免模型或规则任一侧发现的风险在合并时丢失。
         List<String> risks = new ArrayList<>();
         node.path("risks").forEach(item -> risks.add(item.asText()));
         rules.risks().forEach(risk -> { if (!risks.contains(risk)) risks.add(risk); });
@@ -62,6 +68,9 @@ public class JavaDocumentExtractionService {
                 merged, risks, node.path("reviewRequired").asBoolean(false) || rules.reviewRequired());
     }
 
+    /**
+     * 提取金额、发票号码和合同风险等可由规则稳定识别的字段，作为模型结果的校验基线。
+     */
     private ExtractionResult ruleExtraction(String text, String scenario) {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("scenario", scenario);
@@ -80,6 +89,9 @@ public class JavaDocumentExtractionService {
         return new ExtractionResult(scenario, text.isBlank() ? 0.2 : 0.82, fields, risks, !risks.isEmpty() || text.isBlank());
     }
 
+    /**
+     * 从所有带金额语义的候选值中选择最大合法金额，主动排除超长编号。
+     */
     private BigDecimal amount(String text) {
         Matcher matcher = YUAN_AMOUNT.matcher(text == null ? "" : text);
         BigDecimal selected = BigDecimal.ZERO;
@@ -94,6 +106,7 @@ public class JavaDocumentExtractionService {
         return selected;
     }
 
+    /** 根据原文业务关键词优先判断文档场景，调用方指定场景作为后备。 */
     private String detectScenario(String text, String requested) {
         String normalized = requested == null ? "general" : requested.toLowerCase();
         if (text != null && Pattern.compile("发票|价税合计|税率|税额").matcher(text).find()) return "invoice";

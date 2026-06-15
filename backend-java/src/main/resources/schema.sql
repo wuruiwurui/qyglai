@@ -11,3 +11,16 @@ CREATE TABLE IF NOT EXISTS automation_module (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS ai_embedding_config (
+    id BIGINT PRIMARY KEY,
+    enabled TINYINT NOT NULL DEFAULT 1,
+    provider VARCHAR(64) NOT NULL,
+    api_url VARCHAR(512) NOT NULL,
+    api_key VARCHAR(1024),
+    model VARCHAR(128) NOT NULL,
+    dimension INT NOT NULL,
+    milvus_url VARCHAR(512) NOT NULL,
+    collection_name VARCHAR(128) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

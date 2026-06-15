@@ -399,6 +399,18 @@ export type AiModelHealthStatus = {
   checkedAt?: string | null;
 };
 
+export type AiEmbeddingConfig = {
+  enabled: boolean;
+  provider: string;
+  apiUrl: string;
+  apiKey?: string;
+  apiKeyMasked?: string;
+  model: string;
+  dimension: number;
+  milvusUrl: string;
+  collection: string;
+};
+
 export type AiModelCallLog = {
   id: string;
   providerId?: string | null;
@@ -762,6 +774,24 @@ export function checkAllAiModelHealth(): Promise<AiModelHealthStatus[]> {
 
 export function checkAiModelHealth(id: string): Promise<AiModelHealthStatus> {
   return request<AiModelHealthStatus>(`/api/ai-governance/model-profiles/${id}/health-check`, { method: "POST" });
+}
+
+export function fetchAiEmbeddingConfig(): Promise<AiEmbeddingConfig> {
+  return request<AiEmbeddingConfig>("/api/ai-governance/embedding-config");
+}
+
+export function saveAiEmbeddingConfig(config: AiEmbeddingConfig): Promise<AiEmbeddingConfig> {
+  return request<AiEmbeddingConfig>("/api/ai-governance/embedding-config", {
+    method: "POST", body: JSON.stringify(config)
+  });
+}
+
+export function testAiEmbeddingConfig(): Promise<KnowledgeVectorStatus> {
+  return request<KnowledgeVectorStatus>("/api/ai-governance/embedding-config/test", { method: "POST" });
+}
+
+export function fetchAiEmbeddingLogs(): Promise<AiModelCallLog[]> {
+  return request<AiModelCallLog[]>("/api/ai-governance/embedding-logs");
 }
 
 export function fetchKnowledgeSpaces(): Promise<KnowledgeSpace[]> {

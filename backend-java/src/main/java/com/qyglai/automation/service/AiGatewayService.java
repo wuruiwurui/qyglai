@@ -53,12 +53,14 @@ public class AiGatewayService {
     public BossChatResponse askBossAssistant(BossChatRequest request) {
         long start = System.currentTimeMillis();
         String businessType = classifyBossBusinessType(request == null ? "" : request.question());
+        // 先由 Java 根据问题类型查询真实数据库，模型只能使用该上下文组织答案。
         Map<String, Object> context = bossBusinessContextService.buildContext(request);
         BossChatRequest enrichedRequest = new BossChatRequest(
                 request.question(), request.timeRange(), request.userId(), context
         );
         String requestText = enrichedRequest.toString();
         BossChatResponse databaseResponse = bossBusinessContextService.fallbackResponse(context);
+        // databaseResponse 同时作为模型不可用时的确定性回答，老板问答不会因外部服务中断。
         String answer = javaAiModelGateway.generateText("boss_query",
                 "你是企业老板的经营助手。所有数字必须严格来自 Java 查询 MySQL 后提供的上下文，禁止编造或修改数字。"
                         + "请直接回答问题，说明关键数字、风险和下一步动作。",
@@ -91,6 +93,7 @@ public class AiGatewayService {
         String requestText = (file.getOriginalFilename() == null ? "unknown" : file.getOriginalFilename())
                 + ":" + file.getSize();
         try {
+            // 文件解析负责得到原文，结构化抽取负责把原文转换为可入库业务字段。
             var parsed = javaFileParserService.parse(file);
             var extraction = javaDocumentExtractionService.extract(parsed.rawText(), normalizedScenario);
             recordAiCall("file_parse_extract", extraction.scenario(), null, javaAiModelGateway.status().model(),
@@ -115,6 +118,7 @@ public class AiGatewayService {
                               String promptTemplateCode, String requestText, long startMs,
                               boolean success, String errorMessage) {
         try {
+            // 调用日志只保存摘要、哈希和统计信息，避免把完整敏感业务原文重复落库。
             AiModelCallLogEntity log = new AiModelCallLogEntity();
             log.setId(IdWorker.getId());
             log.setScenario(scenario);

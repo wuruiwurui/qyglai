@@ -36,6 +36,9 @@ public class JavaFileParserService {
         this.ocrService = ocrService;
     }
 
+    /**
+     * 根据文件扩展名选择本地解析器；图片和扫描版 PDF 自动进入多模态 OCR 链路。
+     */
     public ParsedFileResult parse(MultipartFile file) {
         try {
             String filename = file.getOriginalFilename() == null ? "upload.bin" : file.getOriginalFilename();
@@ -44,6 +47,7 @@ public class JavaFileParserService {
             List<String> warnings = new ArrayList<>();
             String ocrEngine = null;
             int pageCount = 1;
+            // 可直接读取文本的办公文件优先本地解析，降低模型成本并保留原始字符精度。
             String rawText = switch (extension) {
                 case "txt", "md", "log", "csv" -> decode(file.getBytes());
                 case "json" -> objectMapper.writerWithDefaultPrettyPrinter()
@@ -60,6 +64,7 @@ public class JavaFileParserService {
                 ocrEngine = "multimodal-model";
                 warnings.add("图片已通过当前启用的多模态模型完成OCR识别。");
             } else if ("pdf".equals(extension) && rawText.length() < 30) {
+                // PDFTextStripper 几乎提取不到文字时，判定为扫描件并逐页渲染后调用 OCR。
                 JavaOcrService.OcrPdfResult ocr = ocrService.recognizePdf(bytes);
                 rawText = ocr.text() == null ? "" : ocr.text().strip();
                 pageCount = ocr.totalPages();
@@ -77,6 +82,7 @@ public class JavaFileParserService {
         }
     }
 
+    /** 使用 PDFBox 提取文本型 PDF 的原生文字层。 */
     private String parsePdf(byte[] bytes) throws IOException {
         try (PDDocument document = Loader.loadPDF(bytes)) {
             return new PDFTextStripper().getText(document);
@@ -89,6 +95,7 @@ public class JavaFileParserService {
         }
     }
 
+    /** 提取 Word 段落与表格内容，并保持基本阅读顺序。 */
     private String parseDocx(byte[] bytes) throws IOException {
         List<String> lines = new ArrayList<>();
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
@@ -101,6 +108,7 @@ public class JavaFileParserService {
         return String.join("\n", lines);
     }
 
+    /** 将 Excel 每个工作表和非空行转换为便于后续抽取的纯文本。 */
     private String parseExcel(byte[] bytes) throws IOException {
         List<String> lines = new ArrayList<>();
         DataFormatter formatter = new DataFormatter();
@@ -117,6 +125,7 @@ public class JavaFileParserService {
         return String.join("\n", lines);
     }
 
+    /** 优先使用 UTF-8 解码，出现替换字符时回退到常见中文编码 GB18030。 */
     private String decode(byte[] bytes) {
         String utf8 = new String(bytes, StandardCharsets.UTF_8);
         if (!utf8.contains("\uFFFD")) return utf8;

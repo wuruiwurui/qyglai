@@ -177,6 +177,7 @@ public class AutomationWorkspaceService {
             Path target = uploadDir.resolve(storedName);
             file.transferTo(target);
 
+            // 文件哈希用于重复文件识别与审计，不用于阻止同一发票重复上传。
             String md5;
             try (InputStream inputStream = Files.newInputStream(target)) {
                 md5 = DigestUtils.md5DigestAsHex(inputStream);
@@ -266,6 +267,7 @@ public class AutomationWorkspaceService {
                 .orderByDesc(DocParseResultEntity::getCreatedAt)
                 .last("LIMIT 1"));
         if (parseResult != null) {
+            // 人工确认结果覆盖展示用的抽取结果，保证重新查询详情时与确认后的页面一致。
             parseResult.setLayoutJson(toJson(Map.of("extraction", new ExtractionResult(
                     firstPresent(confirmedFields, "scenario", "businessType", file.getBusinessType()),
                     1.0,
@@ -277,6 +279,7 @@ public class AutomationWorkspaceService {
         }
 
         String scenario = firstPresent(confirmedFields, "scenario", "businessType", file.getBusinessType()).toLowerCase();
+        // 将人工修正字段同步回业务台账，形成“AI抽取-人工修正-业务数据更新”的数据闭环。
         if (scenario.contains("invoice") || "invoice".equalsIgnoreCase(file.getBusinessType())) {
             updateInvoiceFromConfirmedFields(fileId, confirmedFields);
         } else if (scenario.contains("contract") || "contract".equalsIgnoreCase(file.getBusinessType())) {
@@ -333,23 +336,28 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public FileAiProcessResult processFileWithAi(MultipartFile file, String businessType, Long initiatorUserId) {
+        // 第一步：保存原始文件，后续解析结果和业务记录都通过 fileId 与其关联。
         FileAssetEntity asset = uploadFile(file, businessType);
+        // 第二步：解析文本或执行 OCR，再由规则与真实模型协同完成结构化抽取。
         ParseAndExtractResponse aiResult = aiGatewayService.parseAndExtractFile(file, asset.getBusinessType());
         if (aiResult == null || aiResult.parsed() == null || aiResult.extraction() == null) {
             throw new IllegalStateException("AI文件解析未返回有效结果");
         }
 
+        // 第三步：保存可追溯的原文与抽取结果，并写入合同、发票等专属业务台账。
         DocParseResultEntity parseResult = saveParseResult(asset.getId(), aiResult.parsed().rawText(),
                 aiResult.extraction(), aiResult.parsed().ocrEngine());
         Object businessRecord = createBusinessRecordFromExtraction(asset, aiResult.extraction());
         ReviewTaskEntity reviewTask = null;
         if (aiResult.extraction().reviewRequired()) {
+            // 模型明确要求复核或规则识别出风险时创建人工任务，不让高风险结果直接进入自动流程。
             reviewTask = createReviewTask(aiResult.extraction().scenario(), businessType, extractBusinessId(businessRecord), "AI文件解析需要人工复核", riskLevel(aiResult.extraction()));
         }
         asset.setParseStatus("completed");
         fileAssetMapper.updateById(asset);
         auditService.record("FILE_AI_PROCESS", "文件AI解析入库", "file_asset", asset.getId());
         businessEventService.publish("file.ai_processed", asset.getId(), Map.of("businessType", asset.getBusinessType()));
+        // 第四步：合同和发票自动进入对应审批流，其他文件只保留解析结果。
         WorkflowInstanceSummary workflow = workflowApprovalService.startForBusiness(asset.getBusinessType(),
                 extractBusinessId(businessRecord), asset.getId(), asset.getOriginalName() + "审批", initiatorUserId);
         return new FileAiProcessResult(asset, parseResult, aiResult.extraction(), businessRecord, reviewTask, workflow);
@@ -358,6 +366,7 @@ public class AutomationWorkspaceService {
     private Object createBusinessRecordFromExtraction(FileAssetEntity asset, ExtractionResult extraction) {
         String businessType = asset.getBusinessType() == null ? "" : asset.getBusinessType().toLowerCase();
         String scenario = extraction.scenario() == null ? "" : extraction.scenario().toLowerCase();
+        // 上传时选择的业务类型优先，模型识别场景用于补充判断。
         if (businessType.contains("invoice") || scenario.contains("invoice")) {
             return createInvoiceFromExtraction(asset.getId(), extraction);
         }
@@ -405,6 +414,7 @@ public class AutomationWorkspaceService {
         invoice.setFileId(fileId);
         invoice.setInvoiceNo(firstPresent(fields, "invoice_no", "invoiceNo", "FP-AI-" + invoice.getId()));
         invoice.setInvoiceCode(firstPresent(fields, "invoice_code", "invoiceCode", "AI-" + fileId));
+        // 允许重复发票入库，但通过 duplicateFlag 明确标记，交由财务人员复核。
         boolean duplicateInvoice = findExistingInvoice(invoice.getInvoiceNo(), invoice.getInvoiceCode()) != null;
 
         invoice.setBuyerName(firstPresent(fields, "buyer_name", "buyerName", "示例购买方有限公司"));
@@ -689,6 +699,7 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public TicketClassifyResult classifyTicket(TextProcessRequest request) {
+        // AI 输出只作为分类、优先级和回复建议，最终结果仍结构化写入工单台账。
         AiBusinessApplicationService.TicketDecision decision = aiBusinessApplicationService.classifyTicket(request.content());
         Long ticketId = IdWorker.getId();
         TicketEntity ticket = new TicketEntity();
@@ -705,6 +716,7 @@ public class AutomationWorkspaceService {
         ticket.setConfidence(BigDecimal.valueOf(decision.confidence()));
         ticketMapper.insert(ticket);
 
+        // 回复建议与工单分表保存，后续可记录客服是否采纳并用于模型效果评估。
         TicketReplySuggestionEntity suggestion = new TicketReplySuggestionEntity();
         suggestion.setTicketId(ticketId);
         suggestion.setSuggestionText(decision.replySuggestion());
@@ -776,6 +788,7 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ReportSummary generateReport(ReportGenerateRequest request) {
+        // 报表中的业务数字先由 Java 查库汇总，模型只负责组织语言和章节结构。
         AiBusinessApplicationService.ReportContent generated = aiBusinessApplicationService.generateReport(request);
         Long reportId = IdWorker.getId();
         ReportRecordEntity record = new ReportRecordEntity();
@@ -871,6 +884,7 @@ public class AutomationWorkspaceService {
             return false;
         }
         task.setStatus("completed");
+        // 同时保留原 AI 建议和人工结论，为后续评估模型准确率提供样本。
         task.setReviewResult(toJson(Map.of(
                 "aiAdvice", task.getReviewResult() == null ? "" : task.getReviewResult(),
                 "humanResult", result,

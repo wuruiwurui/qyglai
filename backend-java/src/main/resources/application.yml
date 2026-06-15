@@ -56,9 +56,6 @@ springdoc:
   swagger-ui:
     enabled: true
 
-knife4j:
-  enable: true
-
 logging:
   charset:
     console: UTF-8
@@ -77,13 +74,6 @@ automation:
     default-topic: qyglai-business-events
   cache:
     redis-enabled: false
-  vector-store:
-    enabled: true
-    embedding-model: ep-20260615092553-lqvch
-    embedding-url: https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal
-    dimension: 2048
-    milvus-url: http://localhost:19530
-    collection: qyglai_knowledge_chunks
 
 ---
 spring:

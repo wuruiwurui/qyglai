@@ -94,6 +94,7 @@ public class WorkflowApprovalService {
         String businessType = stringVariable(request.variables(), "businessType", definition.getScenario());
         Long businessId = longVariable(request.variables(), "businessId");
         if (businessId != null) {
+            // 同一业务记录已经存在运行中实例时直接返回，防止重复提交产生多条审批链。
             WorkflowInstanceEntity running = instanceMapper.selectOne(new LambdaQueryWrapper<WorkflowInstanceEntity>()
                     .eq(WorkflowInstanceEntity::getDefinitionId, definition.getId())
                     .eq(WorkflowInstanceEntity::getBusinessType, businessType)
@@ -117,6 +118,7 @@ public class WorkflowApprovalService {
         instance.setVariablesJson(toJson(request.variables()));
         instance.setStatus("running");
         instanceMapper.insert(instance);
+        // 流程实例创建后立即同步业务台账状态，使合同、发票页面能展示“审批中”。
         businessApprovalStatusService.markPending(businessType, businessId);
 
         WorkflowTaskEntity task = createTask(instance.getId(), first, initiatorUserId);
@@ -201,6 +203,7 @@ public class WorkflowApprovalService {
         if (!administrator && !operatorUserId.equals(task.getAssigneeUserId())) {
             throw new IllegalArgumentException("当前用户不是该任务处理人");
         }
+        // 所有动作都在同一事务内更新任务、实例、业务状态和审批日志。
         return switch (request.action().toLowerCase()) {
             case "approve" -> approve(task, request.comment(), operatorUserId);
             case "reject" -> reject(task, request.comment(), operatorUserId);
@@ -209,6 +212,7 @@ public class WorkflowApprovalService {
         };
     }
 
+    /** 完成当前节点并创建下一节点；最后一个节点通过后同步更新业务台账。 */
     private WorkflowInstanceDetail approve(WorkflowTaskEntity task, String comment, Long operatorUserId) {
         completeTask(task, "approved", comment, operatorUserId);
         recordAction(task.getInstanceId(), task.getId(), task.getNodeCode(), "approved", operatorUserId, null, comment);
@@ -217,6 +221,7 @@ public class WorkflowApprovalService {
         List<NodeDefinition> nodes = parseNodes(definition.getDefinitionJson());
         int currentIndex = indexOf(nodes, task.getNodeCode());
         if (currentIndex + 1 >= nodes.size()) {
+            // 当前节点是最后节点，结束流程并把关联业务记录标记为已通过。
             instance.setStatus("approved");
             instance.setCurrentNode("DONE");
             instance.setEndedAt(LocalDateTime.now());
@@ -224,6 +229,7 @@ public class WorkflowApprovalService {
             businessApprovalStatusService.markApproved(instance);
             recordAction(instance.getId(), task.getId(), task.getNodeCode(), "complete", operatorUserId, null, "流程审批完成");
         } else {
+            // 普通节点通过后创建下一节点任务；如果下一节点是 AI 节点会继续自动执行。
             NodeDefinition next = nodes.get(currentIndex + 1);
             WorkflowTaskEntity nextTask = createTask(instance.getId(), next, instance.getInitiatorUserId());
             instance.setCurrentNode(next.code());
@@ -235,6 +241,7 @@ public class WorkflowApprovalService {
         return detail(instance.getId());
     }
 
+    /** 驳回后直接结束当前流程，并同步关联业务记录的审批状态。 */
     private WorkflowInstanceDetail reject(WorkflowTaskEntity task, String comment, Long operatorUserId) {
         completeTask(task, "rejected", comment, operatorUserId);
         recordAction(task.getInstanceId(), task.getId(), task.getNodeCode(), "rejected", operatorUserId, null, comment);
@@ -248,6 +255,7 @@ public class WorkflowApprovalService {
         return detail(instance.getId());
     }
 
+    /** 将当前待办关闭并为目标用户创建同节点替代任务，保留完整转交痕迹。 */
     private WorkflowInstanceDetail transfer(WorkflowTaskEntity task, String comment, Long targetUserId, Long operatorUserId) {
         if (targetUserId == null) {
             throw new IllegalArgumentException("转交时必须指定目标用户");
@@ -279,6 +287,7 @@ public class WorkflowApprovalService {
         task.setInstanceId(instanceId);
         task.setNodeCode(node.code());
         task.setNodeName(node.name());
+        // 未指定节点处理人时默认回落到流程发起人，避免生成无人可处理的待办。
         task.setAssigneeUserId(node.assigneeUserId() == null ? fallbackUserId : node.assigneeUserId());
         task.setTaskType(node.isAi() ? "auto" : "manual");
         task.setStatus("pending");
@@ -300,6 +309,7 @@ public class WorkflowApprovalService {
         WorkflowAiNodeService.AiNodeResult result = workflowAiNodeService.review(instance, node.code(), node.name());
         task.setResultJson(toJson(result));
         if (!result.autoApproved()) {
+            // AI 只在满足自动通过阈值时做决定，否则将同一任务转成人工待办。
             task.setTaskType("manual");
             taskMapper.updateById(task);
             recordAction(instance.getId(), task.getId(), node.code(), "ai_manual_review", operatorUserId,
@@ -308,6 +318,7 @@ public class WorkflowApprovalService {
             return;
         }
 
+        // 自动通过也写入任务结果和动作日志，确保现场审计时可以还原模型决策。
         task.setStatus("approved");
         task.setCompletedAt(LocalDateTime.now());
         taskMapper.updateById(task);
@@ -330,9 +341,11 @@ public class WorkflowApprovalService {
         instanceMapper.updateById(instance);
         recordAction(instance.getId(), nextTask.getId(), next.code(), "arrive", null,
                 nextTask.getAssigneeUserId(), "AI复核通过，进入下一审批节点");
+        // 连续 AI 节点允许递归自动流转，遇到人工节点时自然停止。
         executeAiNodeIfNeeded(instance, definition, nodes, nodeIndex + 1, nextTask, operatorUserId);
     }
 
+    /** 记录每次节点动作，作为审批历史和审计追踪的事实来源。 */
     private void recordAction(Long instanceId, Long taskId, String nodeCode, String action, Long operatorUserId,
                               Long targetUserId, String comment) {
         WorkflowActionLogEntity log = new WorkflowActionLogEntity();

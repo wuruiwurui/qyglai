@@ -62,6 +62,7 @@ public class AuthService {
     @Transactional(rollbackFor = Exception.class)
     public LoginResponse login(LoginRequest request) {
         ensureBootstrapAdmin();
+        // 仅允许状态正常的用户登录，并使用 BCrypt 校验密码散列。
         SysUserEntity user = userMapper.selectOne(new LambdaQueryWrapper<SysUserEntity>()
                 .eq(SysUserEntity::getUsername, request.username())
                 .eq(SysUserEntity::getStatus, "enabled")
@@ -73,6 +74,7 @@ public class AuthService {
         List<String> permissions = listPermissionCodes(user.getId());
         user.setLastLoginAt(LocalDateTime.now());
         userMapper.updateById(user);
+        // 角色和权限编码写入 JWT，后续请求无需每次重新查询权限关系表。
         String token = tokenService.createToken(user.getId(), user.getUsername(), roles, permissions);
         return new LoginResponse(token, "Bearer", tokenService.ttlSeconds(), toCurrentUser(user), roles, permissions);
     }
@@ -96,6 +98,7 @@ public class AuthService {
         List<Long> roleIds = userRoleMapper.selectList(new LambdaQueryWrapper<SysUserRoleEntity>().eq(SysUserRoleEntity::getUserId, userId))
                 .stream().map(SysUserRoleEntity::getRoleId).toList();
         if (roleIds.isEmpty()) {
+            // 兼容初始演示环境：尚未配置角色关系的首个管理员拥有管理权限。
             return List.of("ADMIN");
         }
         return roleMapper.selectBatchIds(roleIds).stream().map(SysRoleEntity::getRoleCode).toList();
@@ -123,6 +126,7 @@ public class AuthService {
         if (existing != null) {
             return;
         }
+        // 仅在数据库没有 admin 时初始化，避免覆盖用户后来修改的管理员信息和密码。
         SysUserEntity admin = new SysUserEntity();
         admin.setOrgId(ensureRootOrg());
         admin.setUsername("admin");

@@ -13,6 +13,9 @@ import com.qyglai.automation.dto.AiEvaluationDashboard;
 import com.qyglai.automation.dto.AiScenarioRoute;
 import com.qyglai.automation.dto.AiScenarioRouteView;
 import com.qyglai.automation.dto.AiModelHealthStatus;
+import com.qyglai.automation.dto.AiEmbeddingConfig;
+import com.qyglai.automation.dto.AiEmbeddingConfigView;
+import com.qyglai.automation.dto.KnowledgeVectorStatus;
 import com.qyglai.automation.entity.AiEvaluationSampleEntity;
 import com.qyglai.automation.entity.AiModelCallLogEntity;
 import com.qyglai.automation.entity.AiModelProviderEntity;
@@ -23,6 +26,10 @@ import com.qyglai.automation.service.JavaAiModelConfigService;
 import com.qyglai.automation.service.JavaAiModelGateway;
 import com.qyglai.automation.service.AiEvaluationService;
 import com.qyglai.automation.service.AiModelHealthService;
+import com.qyglai.automation.service.AiEmbeddingConfigService;
+import com.qyglai.automation.service.DoubaoEmbeddingService;
+import com.qyglai.automation.service.MilvusVectorStoreService;
+import com.qyglai.automation.service.AiCallLogService;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -47,16 +54,26 @@ public class AiGovernanceController {
     private final JavaAiModelGateway modelGateway;
     private final AiEvaluationService aiEvaluationService;
     private final AiModelHealthService modelHealthService;
+    private final AiEmbeddingConfigService embeddingConfigService;
+    private final DoubaoEmbeddingService embeddingService;
+    private final MilvusVectorStoreService milvusVectorStoreService;
+    private final AiCallLogService aiCallLogService;
 
     public AiGovernanceController(AutomationWorkspaceService service, AiGovernanceService aiGovernanceService,
                                   JavaAiModelConfigService modelConfigService, JavaAiModelGateway modelGateway,
-                                  AiEvaluationService aiEvaluationService, AiModelHealthService modelHealthService) {
+                                  AiEvaluationService aiEvaluationService, AiModelHealthService modelHealthService,
+                                  AiEmbeddingConfigService embeddingConfigService, DoubaoEmbeddingService embeddingService,
+                                  MilvusVectorStoreService milvusVectorStoreService, AiCallLogService aiCallLogService) {
         this.service = service;
         this.aiGovernanceService = aiGovernanceService;
         this.modelConfigService = modelConfigService;
         this.modelGateway = modelGateway;
         this.aiEvaluationService = aiEvaluationService;
         this.modelHealthService = modelHealthService;
+        this.embeddingConfigService = embeddingConfigService;
+        this.embeddingService = embeddingService;
+        this.milvusVectorStoreService = milvusVectorStoreService;
+        this.aiCallLogService = aiCallLogService;
     }
 
     @GetMapping("/runtime-config")
@@ -72,6 +89,31 @@ public class AiGovernanceController {
     @GetMapping("/runtime-status")
     public ApiResponse<AiRuntimeStatus> runtimeStatus() {
         return ApiResponse.ok(modelGateway.status());
+    }
+
+    /** 查询页面维护的Embedding与Milvus数据库配置。 */
+    @GetMapping("/embedding-config")
+    public ApiResponse<AiEmbeddingConfigView> embeddingConfig() {
+        return ApiResponse.ok(embeddingConfigService.view());
+    }
+
+    /** 保存Embedding与Milvus数据库配置，保存后立即生效。 */
+    @PostMapping("/embedding-config")
+    public ApiResponse<AiEmbeddingConfigView> saveEmbeddingConfig(@RequestBody AiEmbeddingConfig request) {
+        return ApiResponse.ok(embeddingConfigService.save(request));
+    }
+
+    /** 执行一次真实Embedding调用并检查Milvus连接。 */
+    @PostMapping("/embedding-config/test")
+    public ApiResponse<KnowledgeVectorStatus> testEmbeddingConfig() {
+        embeddingService.embed("企业知识库Embedding连接测试");
+        return ApiResponse.ok(milvusVectorStoreService.status());
+    }
+
+    /** 查询最近100条Embedding调用日志。 */
+    @GetMapping("/embedding-logs")
+    public ApiResponse<List<AiModelCallLogEntity>> embeddingLogs() {
+        return ApiResponse.ok(aiCallLogService.listEmbeddingLogs());
     }
 
     /** 查询所有模型最近一次健康检查状态。 */

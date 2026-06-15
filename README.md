@@ -180,6 +180,8 @@
 
 - 使用豆包真实 Embedding 接入点 `ep-20260615092553-lqvch` 生成 `2048` 维语义向量。
 - 使用 Milvus Standalone 保存真实向量并执行 COSINE Top-K 检索。
+- Embedding API地址、API Key、接入点ID、向量维度、Milvus地址和集合名称均在AI治理页面维护，并持久化到MySQL `ai_embedding_config`，不写入应用配置文件。
+- AI治理页面提供Embedding真实连接测试和最近100条专属调用日志，知识入库、问题检索和连接测试均可追踪。
 - MySQL `kb_chunk` 继续保存知识切片、引用关系、Embedding模型和Milvus向量引用，保证业务数据可追踪。
 - 可查看命中文档、原始知识片段和相似度。
 - Milvus或豆包Embedding暂时不可用时，自动降级到Java本地哈希向量检索，知识问答不会完全中断。
@@ -206,6 +208,10 @@
 | `POST /api/kb/query` | 基于检索上下文进行知识问答 |
 | `GET /api/kb/vector-status` | 查询豆包Embedding与Milvus运行状态 |
 | `POST /api/kb/vectors/reindex` | 将历史知识切片重建为真实语义向量 |
+| `GET /api/ai-governance/embedding-config` | 查询脱敏的Embedding与Milvus配置 |
+| `POST /api/ai-governance/embedding-config` | 保存Embedding与Milvus配置 |
+| `POST /api/ai-governance/embedding-config/test` | 执行真实Embedding与Milvus连接测试 |
+| `GET /api/ai-governance/embedding-logs` | 查询Embedding专属调用日志 |
 
 ## 环境与启动
 
@@ -229,7 +235,8 @@ mvn "-Dmaven.repo.local=D:\kfhj\maven\mavenqiye" spring-boot:run
 
 - 健康检查：`http://localhost:8080/actuator/health`
 - Swagger API 文档：`http://localhost:8080/swagger-ui/index.html`
-- Knife4j API 文档：`http://localhost:8080/doc.html`
+- Swagger 已为全部接口提供中文模块分组、中文接口名称和中文功能说明。
+- Java 后端核心业务链路已补充中文代码注释，重点说明主要方法职责、跨服务调用、模型降级、数据落库、审批流转与复杂代码块的设计意图。
 
 ### 2. 启动 Vue 前端
 
@@ -275,10 +282,11 @@ AI 模型配置文件已加入 `.gitignore`，不要提交真实 API Key。新�
 - Redis：客户端已集成，默认关闭实际读写。
 - Kafka：客户端已集成，默认关闭事件投递。
 - Spring Security：JWT 与 RBAC 权限控制。
-- Springdoc / Knife4j：接口文档。
+- Springdoc OpenAPI：接口文档。
 - MySQL：业务数据、知识切片、引用关系和向量元数据存储。
 - 豆包 Embedding：生成真实语义向量，当前接入点为 `ep-20260615092553-lqvch`。
 - Milvus：保存知识向量并执行高性能语义相似度检索，默认地址 `localhost:19530`。
+- Embedding配置表：MySQL `ai_embedding_config`，由AI治理页面维护并即时生效。
 
 ## 业务专属工作台
 

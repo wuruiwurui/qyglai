@@ -111,6 +111,7 @@ public class KnowledgeRagService {
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("文档没有可索引的文本内容");
         }
+        // 先保存文档主记录并标记为索引中，避免前端把尚未完成向量化的文档用于问答。
         KbDocumentEntity document = new KbDocumentEntity();
         document.setId(IdWorker.getId());
         document.setSpaceId(spaceId);
@@ -125,6 +126,7 @@ public class KnowledgeRagService {
 
         List<String> chunks = split(content);
         for (int i = 0; i < chunks.size(); i++) {
+            // 每个切片独立生成向量；真实向量服务失败时，indexVector 会自动保留本地降级向量。
             KbChunkEntity chunk = new KbChunkEntity();
             chunk.setId(IdWorker.getId());
             chunk.setDocumentId(document.getId());
@@ -155,14 +157,20 @@ public class KnowledgeRagService {
         if (documents.isEmpty()) return List.of();
 
         try {
+            // 主链路使用豆包 Embedding + Milvus，保证语义召回能力。
             return searchMilvus(question, documents, topK);
         } catch (RuntimeException exception) {
+            // 外部模型或 Milvus 不可用时使用 MySQL 中保存的本地哈希向量，保证知识问答仍可运行。
             return searchFallback(question, documents, topK);
         }
     }
 
+    /**
+     * 将问题转换为真实语义向量，在 Milvus 中召回候选切片，再按当前知识空间权限过滤。
+     */
     private List<KnowledgeSearchHit> searchMilvus(String question, Map<Long, KbDocumentEntity> documents, int topK) {
         List<Double> queryVector = embeddingService.embed(question);
+        // 扩大初始召回数量，为后续权限过滤和低分过滤留下足够候选。
         List<MilvusVectorStoreService.VectorHit> vectorHits = milvusVectorStoreService.search(
                 queryVector, Math.max(20, Math.min(topK * 8, 100)));
         Map<Long, KbChunkEntity> chunks = new LinkedHashMap<>();
@@ -181,6 +189,9 @@ public class KnowledgeRagService {
                 .toList();
     }
 
+    /**
+     * 使用存储在 MySQL 元数据中的本地哈希向量进行降级检索。
+     */
     private List<KnowledgeSearchHit> searchFallback(String question, Map<Long, KbDocumentEntity> documents, int topK) {
         double[] queryVector = embedFallback(question);
         return chunkMapper.selectList(new LambdaQueryWrapper<KbChunkEntity>()
@@ -196,6 +207,7 @@ public class KnowledgeRagService {
     /** 将历史知识切片重新生成真实Embedding并写入Milvus。 */
     public int reindexVectors() {
         List<KbChunkEntity> chunks = chunkMapper.selectList(new LambdaQueryWrapper<KbChunkEntity>().orderByAsc(KbChunkEntity::getId));
+        // 重建集合可确保 Milvus 向量维度、索引参数与页面中最新配置保持一致。
         milvusVectorStoreService.recreateCollection();
         int indexed = 0;
         for (KbChunkEntity chunk : chunks) {
@@ -226,6 +238,7 @@ public class KnowledgeRagService {
 
         StringBuilder context = new StringBuilder();
         Set<String> citations = new LinkedHashSet<>();
+        // 将召回片段编号后拼入提示词，同时把编号作为最终答案的可追溯引用返回前端。
         for (int i = 0; i < hits.size(); i++) {
             KnowledgeSearchHit hit = hits.get(i);
             String citation = "[" + (i + 1) + "] " + hit.title();
@@ -235,6 +248,7 @@ public class KnowledgeRagService {
         String fallback = "根据知识库资料：" + hits.getFirst().content();
         String requestText = "问题：" + request.question() + "\n\n知识片段：\n" + context;
         long start = System.currentTimeMillis();
+        // 大模型只负责基于召回资料组织答案；检索结果为空或模型失败时不会让模型自由编造。
         String answer = modelGateway.generateText("knowledge_query",
                 "你是企业知识库助手。只能根据提供的知识片段回答，不得编造。"
                         + "回答中的关键结论必须使用[1]、[2]形式标注来源；资料不足时明确说明。",
@@ -292,6 +306,7 @@ public class KnowledgeRagService {
         while (start < text.length()) {
             int end = Math.min(text.length(), start + CHUNK_SIZE);
             if (end < text.length()) {
+                // 优先在段落或句号处截断，减少一个完整语义被拆到两个切片中的情况。
                 int paragraph = text.lastIndexOf("\n", end);
                 int sentence = Math.max(text.lastIndexOf('。', end), text.lastIndexOf('.', end));
                 int boundary = Math.max(paragraph, sentence);
@@ -300,13 +315,18 @@ public class KnowledgeRagService {
             String chunk = text.substring(start, end).strip();
             if (!chunk.isBlank()) result.add(chunk);
             if (end >= text.length()) break;
+            // 保留固定重叠区，降低答案刚好位于切片边界时的召回损失。
             start = Math.max(start + 1, end - CHUNK_OVERLAP);
         }
         return result;
     }
 
+    /**
+     * 为单个知识切片建立真实向量索引；异常时写入本地向量元数据以支持降级检索。
+     */
     private boolean indexVector(KbChunkEntity chunk, KbDocumentEntity document) {
         try {
+            // 豆包负责生成真实语义向量，Milvus 只负责保存和相似度检索。
             List<Double> vector = embeddingService.embed(chunk.getContent());
             milvusVectorStoreService.upsert(chunk.getId(), document.getId(), document.getSpaceId(), vector);
             chunk.setEmbeddingModel(embeddingService.model());
@@ -314,6 +334,7 @@ public class KnowledgeRagService {
             chunk.setMetadataJson(metadata(embedFallback(chunk.getContent()), document));
             return true;
         } catch (RuntimeException exception) {
+            // 索引任务不因外部服务短暂故障整体回滚，后续可通过“重建向量索引”补齐。
             chunk.setEmbeddingModel(FALLBACK_EMBEDDING_MODEL);
             chunk.setVectorRef("mysql:" + chunk.getId());
             chunk.setMetadataJson(metadata(embedFallback(chunk.getContent()), document));
@@ -321,6 +342,9 @@ public class KnowledgeRagService {
         }
     }
 
+    /**
+     * 生成无需外部依赖的归一化哈希向量，仅用于真实向量服务不可用时兜底。
+     */
     private double[] embedFallback(String text) {
         double[] vector = new double[VECTOR_DIMENSION];
         String normalized = text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");

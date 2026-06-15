@@ -18,6 +18,25 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------
+-- Table structure for ai_embedding_config
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_embedding_config`;
+CREATE TABLE `ai_embedding_config` (
+  `id` bigint NOT NULL COMMENT '主键ID',
+  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用真实Embedding',
+  `provider` varchar(64) NOT NULL COMMENT '模型供应商',
+  `api_url` varchar(512) NOT NULL COMMENT 'Embedding完整调用地址',
+  `api_key` varchar(1024) NULL COMMENT 'Embedding API密钥',
+  `model` varchar(128) NOT NULL COMMENT 'Embedding模型或接入点ID',
+  `dimension` int NOT NULL COMMENT '向量维度',
+  `milvus_url` varchar(512) NOT NULL COMMENT 'Milvus REST地址',
+  `collection_name` varchar(128) NOT NULL COMMENT 'Milvus集合名称',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI Embedding与向量数据库配置表';
+
+-- ----------------------------
 -- Table structure for ai_evaluation_sample
 -- ----------------------------
 DROP TABLE IF EXISTS `ai_evaluation_sample`;
