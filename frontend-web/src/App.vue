@@ -142,110 +142,12 @@
       <PermissionManagementWorkbench v-if="isSystemGroup" />
       <WorkflowApprovalWorkbench v-if="isWorkflowGroup" />
       <KnowledgeWorkbench v-if="isKnowledgeGroup" />
-
-      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup && !isKnowledgeGroup" class="metric-grid">
-        <article v-for="metric in metricCards" :key="metric.name" class="metric-card" :class="metric.status">
-          <span>{{ metric.name }}</span>
-          <strong>{{ metric.value }}</strong>
-          <small>{{ metric.trend }}</small>
-        </article>
-      </section>
-
-      <section v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup && !isKnowledgeGroup" class="business-workspace">
-        <header class="business-action-bar">
-          <div class="business-tabs" role="tablist" aria-label="业务视图">
-            <button
-              v-for="endpoint in activeEndpoints"
-              :key="endpoint.key"
-              :class="{ active: selectedEndpoint?.key === endpoint.key }"
-              type="button"
-              @click="selectEndpoint(endpoint)"
-            >
-              {{ endpoint.title }}
-            </button>
-          </div>
-          <span class="state-pill" :class="dataState">{{ dataStateText }}</span>
-        </header>
-
-        <form v-if="selectedEndpoint?.fields?.length" class="business-filter-bar" @submit.prevent="executeSelected">
-          <label v-for="field in selectedEndpoint.fields" :key="field.name" :class="{ wide: field.type === 'textarea' || field.type === 'json' || field.type === 'file' }">
-            <span>{{ field.label }}</span>
-            <input v-if="field.type === 'text' || field.type === 'number'" :type="field.type" :value="getFormValue(field.name)" @input="setFormValue(field.name, ($event.target as HTMLInputElement).value)" />
-            <select v-else-if="field.type === 'select'" :value="getFormValue(field.name)" @change="setFormValue(field.name, ($event.target as HTMLSelectElement).value)">
-              <option v-for="option in field.options" :key="option" :value="option">{{ option }}</option>
-            </select>
-            <textarea v-else-if="field.type === 'textarea' || field.type === 'json'" :value="getFormValue(field.name)" rows="3" @input="setFormValue(field.name, ($event.target as HTMLTextAreaElement).value)" />
-            <input v-else-if="field.type === 'file'" type="file" @change="handleFileChange(field.name, $event)" />
-            <input v-else-if="field.type === 'switch'" :checked="getBooleanValue(field.name)" type="checkbox" @change="setFormValue(field.name, ($event.target as HTMLInputElement).checked)" />
-          </label>
-          <button class="primary-button" type="submit" :disabled="dataState === 'loading'">
-            <Loader2 v-if="dataState === 'loading'" class="spin" :size="16" />
-            <Search v-else-if="selectedEndpoint?.method === 'GET'" :size="16" />
-            <Play v-else :size="16" />
-            {{ selectedEndpoint?.method === "GET" ? "查询" : "提交" }}
-          </button>
-        </form>
-
-        <section class="data-panel business-data-panel">
-          <div class="table-head">
-            <div>
-              <h2>{{ selectedEndpoint?.title ?? "业务数据" }}</h2>
-              <p>共 {{ filteredRecords.length }} 条记录，点击行查看详情</p>
-            </div>
-            <div class="table-head-actions">
-              <label class="table-tools">
-                <Search :size="16" />
-                <input v-model="keyword" placeholder="搜索当前列表" />
-              </label>
-              <button class="icon-button" type="button" title="刷新列表" aria-label="刷新列表" @click="executeSelected">
-                <RefreshCw :size="16" />
-              </button>
-            </div>
-          </div>
-          <div v-if="!pagedRecords.length" class="empty-table">暂无数据</div>
-          <div v-else class="table-wrap">
-            <table>
-              <thead>
-                <tr><th v-for="column in tableColumns" :key="column">{{ fieldLabel(column) }}</th></tr>
-              </thead>
-              <tbody>
-                <tr v-for="(record, index) in pagedRecords" :key="index" :class="{ selected: selectedRecord === record }" @click="selectedRecord = record">
-                  <td v-for="column in tableColumns" :key="column">{{ formatValue(record[column]) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <footer class="pagination">
-            <button type="button" :disabled="page === 1" @click="page -= 1">上一页</button>
-            <span>{{ page }} / {{ pageCount }}</span>
-            <button type="button" :disabled="page === pageCount" @click="page += 1">下一页</button>
-          </footer>
-        </section>
-      </section>
-
-      <div v-if="selectedRecord" class="detail-drawer-mask" @click.self="selectedRecord = null">
-        <aside class="detail-drawer" aria-label="记录详情">
-          <header>
-            <div>
-              <span>{{ activeGroup }}详情</span>
-              <h2>{{ selectedEndpoint?.title ?? "业务记录" }}</h2>
-            </div>
-            <button class="icon-button" type="button" title="关闭详情" aria-label="关闭详情" @click="selectedRecord = null">
-              <X :size="18" />
-            </button>
-          </header>
-          <section class="detail-summary">
-            <span class="state-pill success">已加载</span>
-            <small>字段信息来自当前列表记录</small>
-          </section>
-          <dl class="detail-field-list">
-            <div v-for="item in selectedRecordEntries" :key="item.key">
-              <dt>{{ fieldLabel(item.key) }}</dt>
-              <dd>{{ formatValue(item.value) }}</dd>
-            </div>
-          </dl>
-        </aside>
-      </div>
+      <BusinessOperationsWorkbench
+        v-if="!isFileGroup && !isAiGovernanceGroup && !isSystemGroup && !isWorkflowGroup && !isKnowledgeGroup"
+        :key="activeGroup"
+        :group="activeGroup"
+        :endpoints="activeEndpoints"
+      />
     </section>
   </main>
 </template>
@@ -282,6 +184,7 @@ import AiGovernanceWorkbench from "./components/AiGovernanceWorkbench.vue";
 import PermissionManagementWorkbench from "./components/PermissionManagementWorkbench.vue";
 import WorkflowApprovalWorkbench from "./components/WorkflowApprovalWorkbench.vue";
 import KnowledgeWorkbench from "./components/KnowledgeWorkbench.vue";
+import BusinessOperationsWorkbench from "./components/BusinessOperationsWorkbench.vue";
 import {
   askBossAssistant,
   clearSession,

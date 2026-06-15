@@ -3,6 +3,7 @@ package com.qyglai.automation.service;
 import com.qyglai.automation.dto.AiEvaluationDashboard;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -100,7 +101,44 @@ public class AiEvaluationService {
                 number(correctionSummary, "affected_files"), number(reviewSummary, "review_tasks"),
                 number(reviewSummary, "completed_reviews"), number(reviewSummary, "feedback_samples"),
                 autoApproved, manualReview, rate(autoApproved, autoApproved + manualReview));
-        return new AiEvaluationDashboard(overview, models, scenarios, corrections, feedback);
+        return new AiEvaluationDashboard(overview, models, scenarios, corrections, feedback,
+                recommendations(overview, models, scenarios, corrections, feedback));
+    }
+
+    private List<AiEvaluationDashboard.Recommendation> recommendations(
+            AiEvaluationDashboard.Overview overview,
+            List<AiEvaluationDashboard.PerformanceItem> models,
+            List<AiEvaluationDashboard.PerformanceItem> scenarios,
+            List<AiEvaluationDashboard.FieldCorrectionItem> corrections,
+            AiEvaluationDashboard.Feedback feedback) {
+        List<AiEvaluationDashboard.Recommendation> items = new ArrayList<>();
+        if (overview.totalCalls() == 0) {
+            items.add(new AiEvaluationDashboard.Recommendation("info", "尚无真实调用样本",
+                    "当前时间范围内没有模型调用数据，暂时无法判断模型质量。", "先执行模型健康检查并运行核心业务场景"));
+            return items;
+        }
+        if (overview.successRate() < 95) items.add(new AiEvaluationDashboard.Recommendation("high", "模型调用成功率偏低",
+                "当前成功率为 " + overview.successRate() + "%，可能影响业务自动化稳定性。", "检查异常模型并配置健康的备用模型"));
+        if (overview.averageLatencyMs() > 8000) items.add(new AiEvaluationDashboard.Recommendation("medium", "模型平均响应较慢",
+                "平均耗时 " + overview.averageLatencyMs() + "ms，交互场景可能出现明显等待。", "为交互场景选择低延迟模型"));
+        scenarios.stream().filter(item -> item.calls() >= 3 && item.successRate() < 90).findFirst().ifPresent(item ->
+                items.add(new AiEvaluationDashboard.Recommendation("high", item.name() + " 场景稳定性不足",
+                        "该场景成功率仅为 " + item.successRate() + "%。", "单独配置场景主模型并增加备用路由")));
+        models.stream().filter(item -> item.calls() >= 3 && item.successRate() < 90).findFirst().ifPresent(item ->
+                items.add(new AiEvaluationDashboard.Recommendation("medium", item.name() + " 模型需要关注",
+                        "该模型近期成功率为 " + item.successRate() + "%。", "执行健康检查，必要时停止用于关键场景")));
+        if (!corrections.isEmpty()) {
+            AiEvaluationDashboard.FieldCorrectionItem top = corrections.getFirst();
+            items.add(new AiEvaluationDashboard.Recommendation("medium", top.fieldName() + " 是高频修正字段",
+                    "该字段已被人工修正 " + top.correctionCount() + " 次。", "优化抽取提示词、规则和字段校验"));
+        }
+        if (feedback.reviewTasks() > 0 && feedback.completedReviews() * 1.0 / feedback.reviewTasks() < 0.7) {
+            items.add(new AiEvaluationDashboard.Recommendation("medium", "人工复核闭环率偏低",
+                    "仍有较多AI结果未完成人工确认。", "优先处理复核队列并沉淀有效反馈样本"));
+        }
+        if (items.isEmpty()) items.add(new AiEvaluationDashboard.Recommendation("low", "AI运行状态稳定",
+                "当前成功率、耗时和业务反馈未发现明显异常。", "继续积累真实样本并定期复盘"));
+        return items.stream().limit(6).toList();
     }
 
     private List<AiEvaluationDashboard.PerformanceItem> performance(String sql) {

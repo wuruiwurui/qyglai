@@ -389,6 +389,16 @@ export type AiScenarioRoute = {
   fallbackModels?: string[];
 };
 
+export type AiModelHealthStatus = {
+  profileId: string;
+  profileName: string;
+  model: string;
+  status: "healthy" | "unhealthy" | "unknown";
+  latencyMs: number;
+  message: string;
+  checkedAt?: string | null;
+};
+
 export type AiModelCallLog = {
   id: string;
   providerId?: string | null;
@@ -432,6 +442,7 @@ export type AiEvaluationDashboard = {
     reviewTasks: number; completedReviews: number; feedbackSamples: number;
     aiAutoApproved: number; aiManualReview: number; aiAutoApprovalRate: number;
   };
+  recommendations: Array<{ level: string; title: string; description: string; action: string }>;
 };
 
 export type KnowledgeSpace = {
@@ -478,6 +489,16 @@ export type KnowledgeIndexResult = {
   title: string;
   chunkCount: number;
   indexingStatus: string;
+};
+
+export type KnowledgeVectorStatus = {
+  enabled: boolean;
+  embeddingModel: string;
+  dimension: number;
+  milvusUrl: string;
+  collection: string;
+  milvusHealthy: boolean;
+  message: string;
 };
 
 export type SystemOrg = {
@@ -731,6 +752,18 @@ export function fetchAiEvaluationDashboard(days = 30): Promise<AiEvaluationDashb
   return request<AiEvaluationDashboard>(`/api/ai-governance/evaluation-dashboard?days=${days}`);
 }
 
+export function fetchAiModelHealth(): Promise<AiModelHealthStatus[]> {
+  return request<AiModelHealthStatus[]>("/api/ai-governance/model-health");
+}
+
+export function checkAllAiModelHealth(): Promise<AiModelHealthStatus[]> {
+  return request<AiModelHealthStatus[]>("/api/ai-governance/model-health/check-all", { method: "POST" });
+}
+
+export function checkAiModelHealth(id: string): Promise<AiModelHealthStatus> {
+  return request<AiModelHealthStatus>(`/api/ai-governance/model-profiles/${id}/health-check`, { method: "POST" });
+}
+
 export function fetchKnowledgeSpaces(): Promise<KnowledgeSpace[]> {
   return request<KnowledgeSpace[]>("/api/kb/spaces");
 }
@@ -773,6 +806,14 @@ export function queryKnowledge(question: string, scope: string): Promise<Knowled
 export function searchKnowledge(question: string, scope: string, topK = 5): Promise<KnowledgeSearchHit[]> {
   const params = new URLSearchParams({ question, scope, topK: String(topK) });
   return request<KnowledgeSearchHit[]>(`/api/kb/search?${params}`);
+}
+
+export function fetchKnowledgeVectorStatus(): Promise<KnowledgeVectorStatus> {
+  return request<KnowledgeVectorStatus>("/api/kb/vector-status");
+}
+
+export function reindexKnowledgeVectors(): Promise<number> {
+  return request<number>("/api/kb/vectors/reindex", { method: "POST" });
 }
 
 export function fetchSystemOrgs(): Promise<SystemOrg[]> {

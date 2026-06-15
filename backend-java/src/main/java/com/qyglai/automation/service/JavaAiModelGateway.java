@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -19,14 +20,24 @@ import org.springframework.web.client.RestClient;
 public class JavaAiModelGateway {
 
     private final JavaAiModelConfigService configService;
+    private final AiModelHealthService healthService;
     private final ObjectMapper objectMapper;
     private volatile String lastCallStatus = "not_called";
     private volatile String lastFallbackReason;
     private volatile String lastUsedModel;
 
-    public JavaAiModelGateway(JavaAiModelConfigService configService, ObjectMapper objectMapper) {
+    @Autowired
+    public JavaAiModelGateway(JavaAiModelConfigService configService, AiModelHealthService healthService, ObjectMapper objectMapper) {
         this.configService = configService;
+        this.healthService = healthService;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * 保留给独立单元测试和非Spring调用方的兼容构造函数。
+     */
+    public JavaAiModelGateway(JavaAiModelConfigService configService, ObjectMapper objectMapper) {
+        this(configService, new AiModelHealthService(configService), objectMapper);
     }
 
     /** 使用默认路由调用模型并解析 JSON。 */
@@ -38,7 +49,7 @@ public class JavaAiModelGateway {
      * 按场景路由调用模型并解析 JSON，主模型返回无效 JSON 时继续尝试备用模型。
      */
     public JsonNode generateJson(String scenario, String systemPrompt, String userPrompt) {
-        List<AiRuntimeConfig> configs = configService.resolveConfigs(scenario);
+        List<AiRuntimeConfig> configs = healthService.orderByHealth(configService.resolveConfigs(scenario));
         String firstModel = firstModel(configs);
         String lastError = null;
         for (AiRuntimeConfig config : configs) {
@@ -66,7 +77,7 @@ public class JavaAiModelGateway {
      * 按场景调用主模型，并在失败时依次切换备用模型。
      */
     public String generateText(String scenario, String systemPrompt, String userPrompt, String fallback) {
-        List<AiRuntimeConfig> configs = configService.resolveConfigs(scenario);
+        List<AiRuntimeConfig> configs = healthService.orderByHealth(configService.resolveConfigs(scenario));
         String firstModel = firstModel(configs);
         String lastError = null;
         for (AiRuntimeConfig config : configs) {
@@ -87,7 +98,7 @@ public class JavaAiModelGateway {
      * 使用 OCR 场景路由调用多模态模型识别图片。
      */
     public String generateVisionText(String prompt, byte[] imageBytes, String mimeType) {
-        List<AiRuntimeConfig> configs = configService.resolveConfigs("document_ocr");
+        List<AiRuntimeConfig> configs = healthService.orderByHealth(configService.resolveConfigs("document_ocr"));
         String firstModel = firstModel(configs);
         String lastError = null;
         for (AiRuntimeConfig config : configs) {

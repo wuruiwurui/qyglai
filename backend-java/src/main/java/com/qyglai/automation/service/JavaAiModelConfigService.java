@@ -40,6 +40,15 @@ public class JavaAiModelConfigService {
     }
 
     /**
+     * 按配置ID获取包含真实密钥的运行配置，仅供服务端模型网关与健康检查使用。
+     */
+    public synchronized AiRuntimeConfig getConfig(String profileId) {
+        AiModelProfile profile = readStore().profiles().stream().filter(item -> item.id().equals(profileId)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("模型配置不存在"));
+        return toRuntimeConfig(profile);
+    }
+
+    /**
      * 查询全部模型配置。
      */
     public synchronized List<AiModelProfileView> listProfiles() {

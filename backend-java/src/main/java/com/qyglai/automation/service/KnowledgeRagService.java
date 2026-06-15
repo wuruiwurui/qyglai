@@ -34,8 +34,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Java 知识库 RAG 服务，负责切片、向量化、检索、引用和答案生成。
  *
- * <p>当前使用 MySQL 保存确定性稀疏哈希向量，部署时无需额外向量数据库。
- * 后续可通过替换向量存储实现平滑迁移至 Milvus 或 OpenSearch。</p>
+ * <p>MySQL保存知识元数据，豆包Embedding生成真实语义向量，Milvus负责COSINE Top-K检索。
+ * 外部向量链路暂时不可用时，保留Java哈希向量作为降级检索能力。</p>
  */
 @Service
 public class KnowledgeRagService {
@@ -44,7 +44,7 @@ public class KnowledgeRagService {
     private static final int CHUNK_SIZE = 700;
     private static final int CHUNK_OVERLAP = 100;
     private static final int DEFAULT_TOP_K = 5;
-    private static final String EMBEDDING_MODEL = "java-hash-embedding-v1";
+    private static final String FALLBACK_EMBEDDING_MODEL = "java-hash-embedding-v1";
 
     private final KbSpaceMapper spaceMapper;
     private final KbDocumentMapper documentMapper;
@@ -53,11 +53,14 @@ public class KnowledgeRagService {
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
     private final AiCallLogService aiCallLogService;
+    private final DoubaoEmbeddingService embeddingService;
+    private final MilvusVectorStoreService milvusVectorStoreService;
 
     public KnowledgeRagService(KbSpaceMapper spaceMapper, KbDocumentMapper documentMapper,
                                KbChunkMapper chunkMapper, JavaAiModelGateway modelGateway,
                                AuditService auditService, ObjectMapper objectMapper,
-                               AiCallLogService aiCallLogService) {
+                               AiCallLogService aiCallLogService, DoubaoEmbeddingService embeddingService,
+                               MilvusVectorStoreService milvusVectorStoreService) {
         this.spaceMapper = spaceMapper;
         this.documentMapper = documentMapper;
         this.chunkMapper = chunkMapper;
@@ -65,6 +68,8 @@ public class KnowledgeRagService {
         this.auditService = auditService;
         this.objectMapper = objectMapper;
         this.aiCallLogService = aiCallLogService;
+        this.embeddingService = embeddingService;
+        this.milvusVectorStoreService = milvusVectorStoreService;
     }
 
     /**
@@ -126,9 +131,7 @@ public class KnowledgeRagService {
             chunk.setChunkIndex(i);
             chunk.setContent(chunks.get(i));
             chunk.setTokenCount(Math.max(1, chunks.get(i).length() / 2));
-            chunk.setEmbeddingModel(EMBEDDING_MODEL);
-            chunk.setVectorRef("mysql:" + chunk.getId());
-            chunk.setMetadataJson(metadata(embed(chunks.get(i)), document));
+            indexVector(chunk, document);
             chunk.setCreatedAt(LocalDateTime.now());
             chunkMapper.insert(chunk);
         }
@@ -151,7 +154,35 @@ public class KnowledgeRagService {
         }
         if (documents.isEmpty()) return List.of();
 
-        double[] queryVector = embed(question);
+        try {
+            return searchMilvus(question, documents, topK);
+        } catch (RuntimeException exception) {
+            return searchFallback(question, documents, topK);
+        }
+    }
+
+    private List<KnowledgeSearchHit> searchMilvus(String question, Map<Long, KbDocumentEntity> documents, int topK) {
+        List<Double> queryVector = embeddingService.embed(question);
+        List<MilvusVectorStoreService.VectorHit> vectorHits = milvusVectorStoreService.search(
+                queryVector, Math.max(20, Math.min(topK * 8, 100)));
+        Map<Long, KbChunkEntity> chunks = new LinkedHashMap<>();
+        chunkMapper.selectBatchIds(vectorHits.stream().map(MilvusVectorStoreService.VectorHit::chunkId).toList())
+                .forEach(chunk -> chunks.put(chunk.getId(), chunk));
+        return vectorHits.stream()
+                .filter(hit -> documents.containsKey(hit.documentId()))
+                .map(hit -> {
+                    KbChunkEntity chunk = chunks.get(hit.chunkId());
+                    KbDocumentEntity document = documents.get(hit.documentId());
+                    return chunk == null ? null : new KnowledgeSearchHit(chunk.getId(), document.getId(),
+                            document.getTitle(), chunk.getContent(), round(hit.score()), document.getSourceUrl());
+                })
+                .filter(hit -> hit != null && hit.score() > 0.05)
+                .limit(Math.max(1, Math.min(topK, 20)))
+                .toList();
+    }
+
+    private List<KnowledgeSearchHit> searchFallback(String question, Map<Long, KbDocumentEntity> documents, int topK) {
+        double[] queryVector = embedFallback(question);
         return chunkMapper.selectList(new LambdaQueryWrapper<KbChunkEntity>()
                         .in(KbChunkEntity::getDocumentId, documents.keySet()))
                 .stream()
@@ -160,6 +191,26 @@ public class KnowledgeRagService {
                 .sorted(Comparator.comparingDouble(KnowledgeSearchHit::score).reversed())
                 .limit(Math.max(1, Math.min(topK, 20)))
                 .toList();
+    }
+
+    /** 将历史知识切片重新生成真实Embedding并写入Milvus。 */
+    public int reindexVectors() {
+        List<KbChunkEntity> chunks = chunkMapper.selectList(new LambdaQueryWrapper<KbChunkEntity>().orderByAsc(KbChunkEntity::getId));
+        milvusVectorStoreService.recreateCollection();
+        int indexed = 0;
+        for (KbChunkEntity chunk : chunks) {
+            KbDocumentEntity document = documentMapper.selectById(chunk.getDocumentId());
+            if (document == null) continue;
+            boolean realVectorIndexed = indexVector(chunk, document);
+            chunkMapper.updateById(chunk);
+            if (realVectorIndexed) indexed++;
+        }
+        auditService.record("KB_VECTOR_REINDEX", "知识库真实向量索引重建", "kb_chunk", null);
+        return indexed;
+    }
+
+    public com.qyglai.automation.dto.KnowledgeVectorStatus vectorStatus() {
+        return milvusVectorStoreService.status();
     }
 
     /**
@@ -254,7 +305,23 @@ public class KnowledgeRagService {
         return result;
     }
 
-    private double[] embed(String text) {
+    private boolean indexVector(KbChunkEntity chunk, KbDocumentEntity document) {
+        try {
+            List<Double> vector = embeddingService.embed(chunk.getContent());
+            milvusVectorStoreService.upsert(chunk.getId(), document.getId(), document.getSpaceId(), vector);
+            chunk.setEmbeddingModel(embeddingService.model());
+            chunk.setVectorRef("milvus:" + milvusVectorStoreService.status().collection() + ":" + chunk.getId());
+            chunk.setMetadataJson(metadata(embedFallback(chunk.getContent()), document));
+            return true;
+        } catch (RuntimeException exception) {
+            chunk.setEmbeddingModel(FALLBACK_EMBEDDING_MODEL);
+            chunk.setVectorRef("mysql:" + chunk.getId());
+            chunk.setMetadataJson(metadata(embedFallback(chunk.getContent()), document));
+            return false;
+        }
+    }
+
+    private double[] embedFallback(String text) {
         double[] vector = new double[VECTOR_DIMENSION];
         String normalized = text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
         for (String token : tokens(normalized)) {
@@ -287,12 +354,12 @@ public class KnowledgeRagService {
 
     private String metadata(double[] vector, KbDocumentEntity document) {
         try {
-            return objectMapper.writeValueAsString(Map.of(
-                    "vector", vector,
-                    "title", document.getTitle(),
-                    "spaceId", document.getSpaceId(),
-                    "embeddingModel", EMBEDDING_MODEL
-            ));
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            if (vector != null) metadata.put("vector", vector);
+            metadata.put("title", document.getTitle());
+            metadata.put("spaceId", document.getSpaceId());
+            metadata.put("fallbackEmbeddingModel", FALLBACK_EMBEDDING_MODEL);
+            return objectMapper.writeValueAsString(metadata);
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("知识向量序列化失败", ex);
         }
@@ -302,6 +369,7 @@ public class KnowledgeRagService {
         try {
             Map<String, Object> metadata = objectMapper.readValue(metadataJson, new TypeReference<>() {});
             List<?> values = (List<?>) metadata.get("vector");
+            if (values == null) return new double[0];
             double[] vector = new double[values.size()];
             for (int i = 0; i < values.size(); i++) vector[i] = ((Number) values.get(i)).doubleValue();
             return vector;

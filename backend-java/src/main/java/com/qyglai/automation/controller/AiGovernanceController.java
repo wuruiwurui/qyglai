@@ -12,6 +12,7 @@ import com.qyglai.automation.dto.AiModelProfileView;
 import com.qyglai.automation.dto.AiEvaluationDashboard;
 import com.qyglai.automation.dto.AiScenarioRoute;
 import com.qyglai.automation.dto.AiScenarioRouteView;
+import com.qyglai.automation.dto.AiModelHealthStatus;
 import com.qyglai.automation.entity.AiEvaluationSampleEntity;
 import com.qyglai.automation.entity.AiModelCallLogEntity;
 import com.qyglai.automation.entity.AiModelProviderEntity;
@@ -21,6 +22,7 @@ import com.qyglai.automation.service.AutomationWorkspaceService;
 import com.qyglai.automation.service.JavaAiModelConfigService;
 import com.qyglai.automation.service.JavaAiModelGateway;
 import com.qyglai.automation.service.AiEvaluationService;
+import com.qyglai.automation.service.AiModelHealthService;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -44,15 +46,17 @@ public class AiGovernanceController {
     private final JavaAiModelConfigService modelConfigService;
     private final JavaAiModelGateway modelGateway;
     private final AiEvaluationService aiEvaluationService;
+    private final AiModelHealthService modelHealthService;
 
     public AiGovernanceController(AutomationWorkspaceService service, AiGovernanceService aiGovernanceService,
                                   JavaAiModelConfigService modelConfigService, JavaAiModelGateway modelGateway,
-                                  AiEvaluationService aiEvaluationService) {
+                                  AiEvaluationService aiEvaluationService, AiModelHealthService modelHealthService) {
         this.service = service;
         this.aiGovernanceService = aiGovernanceService;
         this.modelConfigService = modelConfigService;
         this.modelGateway = modelGateway;
         this.aiEvaluationService = aiEvaluationService;
+        this.modelHealthService = modelHealthService;
     }
 
     @GetMapping("/runtime-config")
@@ -68,6 +72,24 @@ public class AiGovernanceController {
     @GetMapping("/runtime-status")
     public ApiResponse<AiRuntimeStatus> runtimeStatus() {
         return ApiResponse.ok(modelGateway.status());
+    }
+
+    /** 查询所有模型最近一次健康检查状态。 */
+    @GetMapping("/model-health")
+    public ApiResponse<List<AiModelHealthStatus>> modelHealth() {
+        return ApiResponse.ok(modelHealthService.list());
+    }
+
+    /** 检查全部已启用模型，并更新自动路由的健康依据。 */
+    @PostMapping("/model-health/check-all")
+    public ApiResponse<List<AiModelHealthStatus>> checkAllModels() {
+        return ApiResponse.ok(modelHealthService.checkAll());
+    }
+
+    /** 检查指定模型连接。 */
+    @PostMapping("/model-profiles/{id}/health-check")
+    public ApiResponse<AiModelHealthStatus> checkModel(@PathVariable String id) {
+        return ApiResponse.ok(modelHealthService.check(id));
     }
 
     /**

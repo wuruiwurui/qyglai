@@ -9,6 +9,7 @@ import com.qyglai.automation.dto.KnowledgeIndexResult;
 import com.qyglai.automation.dto.KnowledgeQueryRequest;
 import com.qyglai.automation.dto.KnowledgeSearchHit;
 import com.qyglai.automation.dto.KnowledgeSpaceCreateRequest;
+import com.qyglai.automation.dto.KnowledgeVectorStatus;
 import com.qyglai.automation.entity.FileAssetEntity;
 import com.qyglai.automation.entity.KbDocumentEntity;
 import com.qyglai.automation.entity.KbSpaceEntity;
@@ -106,5 +107,17 @@ public class KnowledgeController {
     @GetMapping("/documents")
     public ApiResponse<List<KbDocumentEntity>> documents(@RequestParam(required = false) String scope) {
         return ApiResponse.ok(ragService.listDocuments(scope));
+    }
+
+    /** 查询豆包Embedding与Milvus真实向量链路状态。 */
+    @GetMapping("/vector-status")
+    public ApiResponse<KnowledgeVectorStatus> vectorStatus() {
+        return ApiResponse.ok(ragService.vectorStatus());
+    }
+
+    /** 将已有知识切片重新生成真实Embedding并写入Milvus。 */
+    @PostMapping("/vectors/reindex")
+    public ApiResponse<Integer> reindexVectors() {
+        return ApiResponse.ok(ragService.reindexVectors());
     }
 }

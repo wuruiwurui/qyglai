@@ -43,7 +43,7 @@
 
       <div class="knowledge-library-footer">
         <Database :size="16" />
-        <span>向量索引由 Java 服务维护</span>
+        <span>{{ vectorStatus?.milvusHealthy ? "豆包 Embedding + Milvus" : "向量服务降级运行" }}</span>
       </div>
     </aside>
 
@@ -118,6 +118,11 @@
         <span class="knowledge-count">{{ visibleDocuments.length }}</span>
       </header>
 
+      <section class="knowledge-vector-state" :class="{ healthy: vectorStatus?.milvusHealthy }">
+        <div><Database :size="16" /><span><strong>{{ vectorStatus?.milvusHealthy ? "真实语义向量已启用" : "真实向量服务异常" }}</strong><small>{{ vectorStatus?.embeddingModel ?? "正在检查向量服务" }} · {{ vectorStatus?.dimension ?? "-" }} 维</small></span></div>
+        <button type="button" title="将已有文档重建为真实向量索引" :disabled="busy || !vectorStatus?.milvusHealthy" @click="reindexVectors"><RefreshCw :size="14" />重建</button>
+      </section>
+
       <div class="knowledge-ingest-tabs">
         <button type="button" :class="{ active: ingestMode === 'file' }" @click="ingestMode = 'file'"><Upload :size="15" />上传</button>
         <button type="button" :class="{ active: ingestMode === 'text' }" @click="ingestMode = 'text'"><FilePenLine :size="15" />录入</button>
@@ -171,9 +176,9 @@ import {
   Library, Loader2, Plus, Quote, RefreshCw, RotateCcw, Search, Send, Upload, UserRound
 } from "lucide-vue-next";
 import {
-  createKnowledgeSpace, fetchKnowledgeDocuments, fetchKnowledgeSpaces, indexKnowledgeFile,
-  indexKnowledgeText, queryKnowledge, searchKnowledge, type KnowledgeDocument, type KnowledgeSearchHit,
-  type KnowledgeSpace
+  createKnowledgeSpace, fetchKnowledgeDocuments, fetchKnowledgeSpaces, fetchKnowledgeVectorStatus, indexKnowledgeFile,
+  indexKnowledgeText, queryKnowledge, reindexKnowledgeVectors, searchKnowledge, type KnowledgeDocument,
+  type KnowledgeSearchHit, type KnowledgeSpace, type KnowledgeVectorStatus
 } from "../services/api";
 
 type KnowledgeMessage = {
@@ -199,6 +204,7 @@ const asking = ref(false);
 const busy = ref(false);
 const notice = ref("选择空间后，可上传文件或直接录入知识。");
 const noticeState = ref<"idle" | "success" | "error">("idle");
+const vectorStatus = ref<KnowledgeVectorStatus | null>(null);
 const chatBody = ref<HTMLElement | null>(null);
 const prompts = ["这份制度的审批条件是什么？", "资料里有哪些风险或例外？", "请总结执行步骤和责任人"];
 const messages = ref<KnowledgeMessage[]>([
@@ -217,8 +223,23 @@ async function loadAll() {
     spaces.value = await fetchKnowledgeSpaces();
     if (!selectedSpace.value && spaces.value.length) selectedSpace.value = spaces.value[0];
     documents.value = await fetchKnowledgeDocuments();
+    vectorStatus.value = await fetchKnowledgeVectorStatus();
   } catch (error) {
     setNotice(error instanceof Error ? error.message : "知识库加载失败", "error");
+  }
+}
+
+async function reindexVectors() {
+  busy.value = true;
+  try {
+    const count = await reindexKnowledgeVectors();
+    setNotice(`已将 ${count} 个历史知识切片重建为真实语义向量`, "success");
+    vectorStatus.value = await fetchKnowledgeVectorStatus();
+    documents.value = await fetchKnowledgeDocuments();
+  } catch (error) {
+    setNotice(error instanceof Error ? error.message : "真实向量索引重建失败", "error");
+  } finally {
+    busy.value = false;
   }
 }
 

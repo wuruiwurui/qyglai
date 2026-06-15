@@ -74,6 +74,24 @@
       </section>
     </section>
 
+    <section class="ai-health-panel">
+      <div class="file-section-head">
+        <div><p>自动路由依据</p><h2>模型连接健康检查</h2></div>
+        <button class="primary-button" type="button" :disabled="healthChecking" @click="checkAllHealth">
+          <Loader2 v-if="healthChecking" class="spin" :size="15" /><HeartPulse v-else :size="15" />检查全部模型
+        </button>
+      </div>
+      <div class="ai-health-grid">
+        <article v-for="item in healthStatuses" :key="item.profileId" :class="item.status">
+          <span><HeartPulse :size="17" /></span>
+          <div><strong>{{ item.profileName }}</strong><small>{{ item.model }}</small><em>{{ item.message }}</em></div>
+          <aside><b>{{ healthLabel(item.status) }}</b><small>{{ item.latencyMs ? `${item.latencyMs}ms` : "未探测" }}</small></aside>
+        </article>
+        <div v-if="!healthStatuses.length" class="file-empty">暂无模型健康状态</div>
+      </div>
+      <p class="ai-health-hint">健康检查结果在 5 分钟内参与自动路由：健康模型优先，近期不可用模型自动后置；未检查时保持场景主备顺序。</p>
+    </section>
+
     <section class="ai-routing-panel">
       <div class="file-section-head">
         <div><p>调用路由</p><h2>场景模型路由与备用切换</h2></div>
@@ -127,6 +145,15 @@
         <article><span><GitCompare :size="16" />AI 自动通过率</span><strong>{{ evaluation.feedback.aiAutoApprovalRate }}%</strong><small>转人工 {{ evaluation.feedback.aiManualReview }} 次</small></article>
       </div>
       <div class="ai-evaluation-grid">
+        <section class="ai-recommendation-panel">
+          <header><div><strong>智能治理建议</strong><small>根据真实调用、人工修正和复核闭环自动生成</small></div></header>
+          <div class="ai-recommendation-list">
+            <article v-for="item in evaluation.recommendations" :key="item.title" :class="item.level">
+              <span><Lightbulb :size="16" /></span>
+              <div><strong>{{ item.title }}</strong><small>{{ item.description }}</small><em>{{ item.action }}</em></div>
+            </article>
+          </div>
+        </section>
         <section>
           <header><div><strong>模型表现</strong><small>成功率、耗时与调用量对比</small></div></header>
           <div class="ai-performance-list">
@@ -195,11 +222,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Activity, CheckCircle2, Cpu, Gauge, GitCompare, Loader2, PencilLine, Plus, Route, Save, Trash2 } from "lucide-vue-next";
+import { Activity, CheckCircle2, Cpu, Gauge, GitCompare, HeartPulse, Lightbulb, Loader2, PencilLine, Plus, Route, Save, Trash2 } from "lucide-vue-next";
 import {
-  deleteAiModelProfile, deleteAiScenarioRoute, fetchAiEvaluationDashboard, fetchAiModelCallLogs, fetchAiModelProfiles,
+  checkAllAiModelHealth, deleteAiModelProfile, deleteAiScenarioRoute, fetchAiEvaluationDashboard, fetchAiModelCallLogs, fetchAiModelHealth, fetchAiModelProfiles,
   fetchAiRuntimeStatus, fetchAiScenarioRoutes, saveAiModelProfile, saveAiScenarioRoute, switchAiModelProfile,
-  type AiEvaluationDashboard, type AiModelCallLog, type AiModelProfile, type AiRuntimeStatus, type AiScenarioRoute
+  type AiEvaluationDashboard, type AiModelCallLog, type AiModelHealthStatus, type AiModelProfile, type AiRuntimeStatus, type AiScenarioRoute
 } from "../services/api";
 
 type LoadState = "idle" | "loading" | "success" | "error";
@@ -209,6 +236,8 @@ const logs = ref<AiModelCallLog[]>([]);
 const evaluation = ref<AiEvaluationDashboard | null>(null);
 const evaluationDays = ref(30);
 const routes = ref<AiScenarioRoute[]>([]);
+const healthStatuses = ref<AiModelHealthStatus[]>([]);
+const healthChecking = ref(false);
 const state = ref<LoadState>("idle");
 const notice = ref("模型切换后，下一次真实模型调用立即生效");
 const emptyProfile = (): AiModelProfile => ({
@@ -234,9 +263,9 @@ onMounted(loadAll);
 async function loadAll() {
   state.value = "loading";
   try {
-    [profiles.value, status.value, logs.value, evaluation.value, routes.value] = await Promise.all([
+    [profiles.value, status.value, logs.value, evaluation.value, routes.value, healthStatuses.value] = await Promise.all([
       fetchAiModelProfiles(), fetchAiRuntimeStatus(), fetchAiModelCallLogs(), fetchAiEvaluationDashboard(evaluationDays.value),
-      fetchAiScenarioRoutes()
+      fetchAiScenarioRoutes(), fetchAiModelHealth()
     ]);
     const selected = profiles.value.find((item) => item.id === config.value.id) ?? currentProfile.value ?? profiles.value[0];
     config.value = selected ? { ...selected, apiKey: "" } : emptyProfile();
@@ -244,6 +273,13 @@ async function loadAll() {
     notice.value = "已加载模型配置";
     state.value = "success";
   } catch (error) { fail(error, "模型配置加载失败"); }
+}
+
+async function checkAllHealth() {
+  healthChecking.value = true;
+  try { healthStatuses.value = await checkAllAiModelHealth(); notice.value = "模型健康检查已完成，结果已参与自动路由"; }
+  catch (error) { fail(error, "模型健康检查失败"); }
+  finally { healthChecking.value = false; }
 }
 
 async function loadEvaluation() {
@@ -308,4 +344,5 @@ function formatStatus(value?: string) { return ({ not_called: "尚未调用", su
 function scenarioLabel(value?: string | null) { return ({ boss_query: "老板问答", file_parse_extract: "文件解析抽取", document_ocr: "图片与扫描件 OCR", knowledge_query: "知识问答", workflow_ai_review: "工作流 AI 复核", ticket_classify: "客服分类", reconciliation_analysis: "对账分析", review_advice: "复核建议", report_generate: "报表生成", sales_followup: "销售跟进建议" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function businessTypeLabel(value?: string | null) { return ({ report: "报表", file: "文件", contract: "合同", invoice: "发票", ticket: "客服工单", company: "全公司知识库", legal: "法务知识库", finance: "财务知识库", sales: "销售知识库" } as Record<string, string>)[value ?? ""] ?? value ?? "-"; }
 function formatTime(value?: string | null) { return value ? value.replace("T", " ").slice(0, 19) : "-"; }
+function healthLabel(value: string) { return ({ healthy: "连接正常", unhealthy: "连接异常", unknown: "尚未检查" } as Record<string, string>)[value] ?? value; }
 </script>
