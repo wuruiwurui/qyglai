@@ -3629,6 +3629,37 @@ tbody tr.selected {
   margin-top: 14px;
 }
 
+.workflow-version-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  background: #f7faf9;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.workflow-version-compare div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.workflow-version-compare small,
+.workflow-version-compare p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workflow-version-compare p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .workflow-palette,
 .workflow-node-properties {
   padding: 14px;
@@ -3823,13 +3854,21 @@ tbody tr.selected {
 
 .workflow-canvas-meta input,
 .workflow-canvas-meta select,
-.workflow-node-properties input {
+.workflow-node-properties input,
+.workflow-node-properties select {
   min-height: 33px;
   padding: 0 8px;
   color: var(--ink);
   background: #fff;
   border: 1px solid #d5ddd9;
   border-radius: 4px;
+}
+
+.workflow-instance-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 12px 0;
 }
 
 .workflow-start-node,

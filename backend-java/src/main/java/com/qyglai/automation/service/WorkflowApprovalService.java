@@ -20,8 +20,10 @@ import com.qyglai.automation.mapper.WorkflowInstanceMapper;
 import com.qyglai.automation.mapper.WorkflowTaskMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,7 +72,10 @@ public class WorkflowApprovalService {
     /** 保存新版本流程定义，旧版本实例不受影响。 */
     @Transactional(rollbackFor = Exception.class)
     public WorkflowDefinitionEntity saveDefinition(WorkflowDefinitionSaveRequest request) {
-        parseNodes(request.definitionJson());
+        List<String> issues = validateDefinition(request);
+        if (!issues.isEmpty()) {
+            throw new IllegalArgumentException(String.join("；", issues));
+        }
         WorkflowDefinitionEntity latest = definitionMapper.selectOne(new LambdaQueryWrapper<WorkflowDefinitionEntity>()
                 .eq(WorkflowDefinitionEntity::getWorkflowCode, request.workflowCode())
                 .orderByDesc(WorkflowDefinitionEntity::getVersionNo)
@@ -85,6 +90,31 @@ public class WorkflowApprovalService {
         definitionMapper.insert(entity);
         auditService.record("WORKFLOW_DEFINITION_SAVE", "保存流程定义", "workflow_definition", entity.getId());
         return entity;
+    }
+
+    /** 发布前执行完整定义校验，前端可一次展示全部问题。 */
+    public List<String> validateDefinition(WorkflowDefinitionSaveRequest request) {
+        List<String> issues = new ArrayList<>();
+        if (request.workflowCode() == null || !request.workflowCode().matches("[a-zA-Z][a-zA-Z0-9_-]{2,63}")) {
+            issues.add("流程编码需以字母开头，长度3-64，只能包含字母、数字、下划线和横线");
+        }
+        try {
+            List<NodeDefinition> nodes = parseNodes(request.definitionJson());
+            Set<String> codes = new HashSet<>();
+            for (NodeDefinition node : nodes) {
+                if (!codes.add(node.code())) issues.add("节点编码重复：" + node.code());
+                if (!node.isCc() && "all".equalsIgnoreCase(node.approvalMode()) && !node.assigneeUserIds().isEmpty()
+                        && node.assigneeUserIds().size() < 2) {
+                    issues.add("会签节点至少需要配置两个处理人：" + node.name());
+                }
+                if ("condition".equalsIgnoreCase(node.type()) && (node.conditionVariable() == null || node.conditionVariable().isBlank())) {
+                    issues.add("条件节点必须配置判断变量：" + node.name());
+                }
+            }
+        } catch (IllegalArgumentException ex) {
+            issues.add(ex.getMessage());
+        }
+        return issues;
     }
 
     /** 发起审批并创建第一个待办任务。 */
@@ -106,7 +136,10 @@ public class WorkflowApprovalService {
             }
         }
         List<NodeDefinition> nodes = parseNodes(definition.getDefinitionJson());
-        NodeDefinition first = nodes.getFirst();
+        Map<String, Object> variables = request.variables() == null ? Map.of() : request.variables();
+        int firstIndex = nextEligibleIndex(nodes, -1, variables);
+        if (firstIndex < 0) throw new IllegalArgumentException("流程没有满足条件的可执行节点");
+        NodeDefinition first = nodes.get(firstIndex);
 
         WorkflowInstanceEntity instance = new WorkflowInstanceEntity();
         instance.setId(IdWorker.getId());
@@ -121,10 +154,11 @@ public class WorkflowApprovalService {
         // 流程实例创建后立即同步业务台账状态，使合同、发票页面能展示“审批中”。
         businessApprovalStatusService.markPending(businessType, businessId);
 
-        WorkflowTaskEntity task = createTask(instance.getId(), first, initiatorUserId);
+        List<WorkflowTaskEntity> firstTasks = createTasks(instance.getId(), first, initiatorUserId);
+        WorkflowTaskEntity task = firstTasks.getFirst();
         recordAction(instance.getId(), task.getId(), first.code(), "start", initiatorUserId, null,
                 stringVariable(request.variables(), "title", "发起审批"));
-        executeAiNodeIfNeeded(instance, definition, nodes, 0, task, initiatorUserId);
+        executeAiNodeIfNeeded(instance, definition, nodes, firstIndex, task, initiatorUserId);
         auditService.record("WORKFLOW_START", "发起审批流程", "workflow_instance", instance.getId());
         return summary(instance, definition.getWorkflowCode());
     }
@@ -193,6 +227,40 @@ public class WorkflowApprovalService {
         return new WorkflowInstanceDetail(instance, definition, tasks, history);
     }
 
+    /** 记录催办动作，通知通道后续可消费该审计事实。 */
+    @Transactional(rollbackFor = Exception.class)
+    public WorkflowInstanceDetail remind(Long instanceId, Long operatorUserId) {
+        WorkflowInstanceEntity instance = requireInstance(instanceId);
+        if (!"running".equals(instance.getStatus())) throw new IllegalArgumentException("仅运行中的流程可以催办");
+        List<WorkflowTaskEntity> pending = taskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>()
+                .eq(WorkflowTaskEntity::getInstanceId, instanceId).eq(WorkflowTaskEntity::getStatus, "pending"));
+        if (pending.isEmpty()) throw new IllegalArgumentException("当前流程没有待办任务");
+        for (WorkflowTaskEntity task : pending) {
+            recordAction(instanceId, task.getId(), task.getNodeCode(), "remind", operatorUserId,
+                    task.getAssigneeUserId(), "审批催办");
+        }
+        auditService.record("WORKFLOW_REMIND", "催办审批流程", "workflow_instance", instanceId);
+        return detail(instanceId);
+    }
+
+    /** 发起人或管理员撤回流程，并关闭全部未处理任务。 */
+    @Transactional(rollbackFor = Exception.class)
+    public WorkflowInstanceDetail withdraw(Long instanceId, Long operatorUserId, boolean administrator) {
+        WorkflowInstanceEntity instance = requireInstance(instanceId);
+        if (!"running".equals(instance.getStatus())) throw new IllegalArgumentException("仅运行中的流程可以撤回");
+        if (!administrator && !operatorUserId.equals(instance.getInitiatorUserId())) throw new IllegalArgumentException("只有发起人可以撤回流程");
+        List<WorkflowTaskEntity> pending = taskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>()
+                .eq(WorkflowTaskEntity::getInstanceId, instanceId).eq(WorkflowTaskEntity::getStatus, "pending"));
+        for (WorkflowTaskEntity task : pending) completeTask(task, "withdrawn", "流程已撤回", operatorUserId);
+        instance.setStatus("withdrawn");
+        instance.setCurrentNode("WITHDRAWN");
+        instance.setEndedAt(LocalDateTime.now());
+        instanceMapper.updateById(instance);
+        recordAction(instanceId, null, "WITHDRAWN", "withdraw", operatorUserId, null, "发起人撤回流程");
+        auditService.record("WORKFLOW_WITHDRAW", "撤回审批流程", "workflow_instance", instanceId);
+        return detail(instanceId);
+    }
+
     /** 处理审批任务。 */
     @Transactional(rollbackFor = Exception.class)
     public WorkflowInstanceDetail act(Long taskId, WorkflowActionRequest request, Long operatorUserId, boolean administrator) {
@@ -220,7 +288,20 @@ public class WorkflowApprovalService {
         WorkflowDefinitionEntity definition = definitionMapper.selectById(instance.getDefinitionId());
         List<NodeDefinition> nodes = parseNodes(definition.getDefinitionJson());
         int currentIndex = indexOf(nodes, task.getNodeCode());
-        if (currentIndex + 1 >= nodes.size()) {
+        NodeDefinition current = nodes.get(currentIndex);
+        List<WorkflowTaskEntity> sameNodePending = taskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>()
+                .eq(WorkflowTaskEntity::getInstanceId, instance.getId())
+                .eq(WorkflowTaskEntity::getNodeCode, task.getNodeCode())
+                .eq(WorkflowTaskEntity::getStatus, "pending"));
+        if (current.isCountersign() && !sameNodePending.isEmpty()) {
+            recordAction(instance.getId(), task.getId(), task.getNodeCode(), "countersign_wait", operatorUserId, null, "等待其他会签人");
+            return detail(instance.getId());
+        }
+        if ("any".equalsIgnoreCase(current.approvalMode())) {
+            for (WorkflowTaskEntity sibling : sameNodePending) completeTask(sibling, "cancelled", "任一审批人已通过", operatorUserId);
+        }
+        int nextIndex = nextEligibleIndex(nodes, currentIndex, parseVariables(instance.getVariablesJson()));
+        if (nextIndex < 0) {
             // 当前节点是最后节点，结束流程并把关联业务记录标记为已通过。
             instance.setStatus("approved");
             instance.setCurrentNode("DONE");
@@ -230,12 +311,12 @@ public class WorkflowApprovalService {
             recordAction(instance.getId(), task.getId(), task.getNodeCode(), "complete", operatorUserId, null, "流程审批完成");
         } else {
             // 普通节点通过后创建下一节点任务；如果下一节点是 AI 节点会继续自动执行。
-            NodeDefinition next = nodes.get(currentIndex + 1);
-            WorkflowTaskEntity nextTask = createTask(instance.getId(), next, instance.getInitiatorUserId());
+            NodeDefinition next = nodes.get(nextIndex);
+            WorkflowTaskEntity nextTask = createTasks(instance.getId(), next, instance.getInitiatorUserId()).getFirst();
             instance.setCurrentNode(next.code());
             instanceMapper.updateById(instance);
             recordAction(instance.getId(), nextTask.getId(), next.code(), "arrive", operatorUserId, nextTask.getAssigneeUserId(), "进入下一审批节点");
-            executeAiNodeIfNeeded(instance, definition, nodes, currentIndex + 1, nextTask, operatorUserId);
+            executeAiNodeIfNeeded(instance, definition, nodes, nextIndex, nextTask, operatorUserId);
         }
         auditService.record("WORKFLOW_APPROVE", "审批通过", "workflow_task", task.getId());
         return detail(instance.getId());
@@ -244,6 +325,11 @@ public class WorkflowApprovalService {
     /** 驳回后直接结束当前流程，并同步关联业务记录的审批状态。 */
     private WorkflowInstanceDetail reject(WorkflowTaskEntity task, String comment, Long operatorUserId) {
         completeTask(task, "rejected", comment, operatorUserId);
+        List<WorkflowTaskEntity> siblings = taskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>()
+                .eq(WorkflowTaskEntity::getInstanceId, task.getInstanceId())
+                .eq(WorkflowTaskEntity::getNodeCode, task.getNodeCode())
+                .eq(WorkflowTaskEntity::getStatus, "pending"));
+        for (WorkflowTaskEntity sibling : siblings) completeTask(sibling, "cancelled", "同节点审批人已驳回", operatorUserId);
         recordAction(task.getInstanceId(), task.getId(), task.getNodeCode(), "rejected", operatorUserId, null, comment);
         WorkflowInstanceEntity instance = requireInstance(task.getInstanceId());
         instance.setStatus("rejected");
@@ -296,6 +382,17 @@ public class WorkflowApprovalService {
         return task;
     }
 
+    private List<WorkflowTaskEntity> createTasks(Long instanceId, NodeDefinition node, Long fallbackUserId) {
+        List<Long> assignees = node.assigneeUserIds().isEmpty()
+                ? List.of(node.assigneeUserId() == null ? fallbackUserId : node.assigneeUserId()) : node.assigneeUserIds();
+        List<WorkflowTaskEntity> tasks = new ArrayList<>();
+        for (Long assignee : assignees) {
+            WorkflowTaskEntity task = createTask(instanceId, node.withAssignee(assignee), fallbackUserId);
+            tasks.add(task);
+        }
+        return tasks;
+    }
+
     /**
      * AI 节点自动执行。高置信度且无风险时自动流转，其他情况保留为人工待办。
      */
@@ -303,6 +400,19 @@ public class WorkflowApprovalService {
                                        List<NodeDefinition> nodes, int nodeIndex, WorkflowTaskEntity task,
                                        Long operatorUserId) {
         NodeDefinition node = nodes.get(nodeIndex);
+        if (node.isCc()) {
+            List<WorkflowTaskEntity> ccTasks = taskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>()
+                    .eq(WorkflowTaskEntity::getInstanceId, instance.getId())
+                    .eq(WorkflowTaskEntity::getNodeCode, node.code())
+                    .eq(WorkflowTaskEntity::getStatus, "pending"));
+            for (WorkflowTaskEntity ccTask : ccTasks) {
+                completeTask(ccTask, "copied", "抄送通知已生成", operatorUserId == null ? instance.getInitiatorUserId() : operatorUserId);
+                recordAction(instance.getId(), ccTask.getId(), node.code(), "cc", operatorUserId,
+                        ccTask.getAssigneeUserId(), "抄送通知");
+            }
+            advanceAutomaticNode(instance, definition, nodes, nodeIndex, task, operatorUserId);
+            return;
+        }
         if (!node.isAi()) {
             return;
         }
@@ -325,24 +435,32 @@ public class WorkflowApprovalService {
         recordAction(instance.getId(), task.getId(), node.code(), "ai_auto_approved", null, null, result.summary());
         auditService.record("WORKFLOW_AI_AUTO_APPROVE", "AI复核自动通过", "workflow_task", task.getId());
 
-        if (nodeIndex + 1 >= nodes.size()) {
+        advanceAutomaticNode(instance, definition, nodes, nodeIndex, task, operatorUserId);
+    }
+
+    /** 自动节点完成后继续流转，供 AI 节点与抄送节点复用。 */
+    private void advanceAutomaticNode(WorkflowInstanceEntity instance, WorkflowDefinitionEntity definition,
+                                      List<NodeDefinition> nodes, int nodeIndex, WorkflowTaskEntity task,
+                                      Long operatorUserId) {
+        int nextIndex = nextEligibleIndex(nodes, nodeIndex, parseVariables(instance.getVariablesJson()));
+        if (nextIndex < 0) {
             instance.setStatus("approved");
             instance.setCurrentNode("DONE");
             instance.setEndedAt(LocalDateTime.now());
             instanceMapper.updateById(instance);
             businessApprovalStatusService.markApproved(instance);
-            recordAction(instance.getId(), task.getId(), node.code(), "complete", null, null, "AI复核后流程自动完成");
+            recordAction(instance.getId(), task.getId(), nodes.get(nodeIndex).code(), "complete", null, null, "自动节点执行后流程完成");
             return;
         }
 
-        NodeDefinition next = nodes.get(nodeIndex + 1);
-        WorkflowTaskEntity nextTask = createTask(instance.getId(), next, instance.getInitiatorUserId());
+        NodeDefinition next = nodes.get(nextIndex);
+        WorkflowTaskEntity nextTask = createTasks(instance.getId(), next, instance.getInitiatorUserId()).getFirst();
         instance.setCurrentNode(next.code());
         instanceMapper.updateById(instance);
         recordAction(instance.getId(), nextTask.getId(), next.code(), "arrive", null,
-                nextTask.getAssigneeUserId(), "AI复核通过，进入下一审批节点");
+                nextTask.getAssigneeUserId(), "自动节点完成，进入下一审批节点");
         // 连续 AI 节点允许递归自动流转，遇到人工节点时自然停止。
-        executeAiNodeIfNeeded(instance, definition, nodes, nodeIndex + 1, nextTask, operatorUserId);
+        executeAiNodeIfNeeded(instance, definition, nodes, nextIndex, nextTask, operatorUserId);
     }
 
     /** 记录每次节点动作，作为审批历史和审计追踪的事实来源。 */
@@ -395,16 +513,24 @@ public class WorkflowApprovalService {
             for (JsonNode node : nodeArray) {
                 if (node.isTextual()) {
                     String code = node.asText();
-                    result.add(new NodeDefinition(inferNodeType(code, code), code, code, null, 24));
+                    result.add(new NodeDefinition(inferNodeType(code, code), code, code, null, List.of(), "all", 24,
+                            null, null, null));
                 } else {
                     String code = node.path("code").asText();
                     if (code.isBlank()) {
                         throw new IllegalArgumentException("审批节点编码不能为空");
                     }
                     String name = node.path("name").asText(code);
+                    List<Long> assigneeUserIds = new ArrayList<>();
+                    if (node.path("assigneeUserIds").isArray()) {
+                        node.path("assigneeUserIds").forEach(item -> assigneeUserIds.add(item.asLong()));
+                    }
                     result.add(new NodeDefinition(node.path("type").asText(inferNodeType(code, name)), code, name,
                             node.hasNonNull("assigneeUserId") ? node.path("assigneeUserId").asLong() : null,
-                            Math.max(1, node.path("dueHours").asInt(24))));
+                            assigneeUserIds, node.path("approvalMode").asText("all"),
+                            Math.max(1, node.path("dueHours").asInt(24)),
+                            node.path("conditionVariable").asText(null), node.path("conditionOperator").asText("equals"),
+                            node.path("conditionValue").asText(null)));
                 }
             }
             return result;
@@ -420,6 +546,45 @@ public class WorkflowApprovalService {
             }
         }
         throw new IllegalArgumentException("当前审批节点不在流程定义中");
+    }
+
+    private int nextEligibleIndex(List<NodeDefinition> nodes, int currentIndex, Map<String, Object> variables) {
+        for (int index = currentIndex + 1; index < nodes.size(); index++) {
+            if (matchesCondition(nodes.get(index), variables)) return index;
+        }
+        return -1;
+    }
+
+    private boolean matchesCondition(NodeDefinition node, Map<String, Object> variables) {
+        if (node.conditionVariable() == null || node.conditionVariable().isBlank()) return true;
+        String actual = String.valueOf(variables.getOrDefault(node.conditionVariable(), ""));
+        String expected = node.conditionValue() == null ? "" : node.conditionValue();
+        return switch (node.conditionOperator() == null ? "equals" : node.conditionOperator()) {
+            case "not_equals" -> !actual.equals(expected);
+            case "contains" -> actual.contains(expected);
+            case "gt" -> number(actual) > number(expected);
+            case "gte" -> number(actual) >= number(expected);
+            case "lt" -> number(actual) < number(expected);
+            case "lte" -> number(actual) <= number(expected);
+            default -> actual.equals(expected);
+        };
+    }
+
+    private double number(String value) {
+        try {
+            return Double.parseDouble(value);
+        } catch (NumberFormatException ex) {
+            return 0D;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseVariables(String json) {
+        try {
+            return json == null || json.isBlank() ? Map.of() : objectMapper.readValue(json, Map.class);
+        } catch (JsonProcessingException ex) {
+            return Map.of();
+        }
     }
 
     private String inferNodeType(String code, String name) {
@@ -462,10 +627,25 @@ public class WorkflowApprovalService {
         }
     }
 
-    /** 流程定义中的顺序审批节点。 */
-    private record NodeDefinition(String type, String code, String name, Long assigneeUserId, int dueHours) {
+    /** 流程定义中的审批节点，支持条件跳过、多人并行和会签。 */
+    private record NodeDefinition(String type, String code, String name, Long assigneeUserId, List<Long> assigneeUserIds,
+                                  String approvalMode, int dueHours, String conditionVariable,
+                                  String conditionOperator, String conditionValue) {
         private boolean isAi() {
             return "ai".equalsIgnoreCase(type);
+        }
+
+        private boolean isCc() {
+            return "cc".equalsIgnoreCase(type);
+        }
+
+        private boolean isCountersign() {
+            return "all".equalsIgnoreCase(approvalMode) && assigneeUserIds != null && assigneeUserIds.size() > 1;
+        }
+
+        private NodeDefinition withAssignee(Long assignee) {
+            return new NodeDefinition(type, code, name, assignee, List.of(), approvalMode, dueHours,
+                    conditionVariable, conditionOperator, conditionValue);
         }
     }
 }

@@ -142,6 +142,14 @@ export type WorkflowDefinition = {
   status: string;
 };
 
+export type WorkflowNodeTemplate = {
+  id?: string;
+  templateKey: string;
+  nodeType: string;
+  label: string;
+  description?: string;
+};
+
 export type WorkflowInstance = {
   /** 流程实例ID。 */
   id: string;
@@ -932,6 +940,30 @@ export function handleWorkflowTask(taskId: string, payload: Record<string, unkno
 
 export function saveWorkflowDefinition(payload: Record<string, unknown>): Promise<WorkflowDefinition> {
   return request<WorkflowDefinition>("/api/workflows/definitions", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function validateWorkflowDefinition(payload: Record<string, unknown>): Promise<string[]> {
+  return request<string[]>("/api/workflows/definitions/validate", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function fetchWorkflowNodeTemplates(): Promise<WorkflowNodeTemplate[]> {
+  return request<WorkflowNodeTemplate[]>("/api/workflows/node-templates");
+}
+
+export function saveWorkflowNodeTemplate(payload: Record<string, unknown>): Promise<WorkflowNodeTemplate> {
+  return request<WorkflowNodeTemplate>("/api/workflows/node-templates", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function deleteWorkflowNodeTemplate(key: string): Promise<void> {
+  return request<void>(`/api/workflows/node-templates/${encodeURIComponent(key)}`, { method: "DELETE" });
+}
+
+export function remindWorkflow(instanceId: string): Promise<WorkflowInstanceDetail> {
+  return request<WorkflowInstanceDetail>(`/api/workflows/instances/${instanceId}/remind`, { method: "POST" });
+}
+
+export function withdrawWorkflow(instanceId: string): Promise<WorkflowInstanceDetail> {
+  return request<WorkflowInstanceDetail>(`/api/workflows/instances/${instanceId}/withdraw`, { method: "POST" });
 }
 
 export async function processFileWithAi(file: File, businessType: string): Promise<FileAiProcessPayload> {

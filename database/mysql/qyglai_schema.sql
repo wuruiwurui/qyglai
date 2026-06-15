@@ -23,6 +23,7 @@ DROP TABLE IF EXISTS review_task;
 DROP TABLE IF EXISTS workflow_task;
 DROP TABLE IF EXISTS workflow_instance;
 DROP TABLE IF EXISTS workflow_definition;
+DROP TABLE IF EXISTS workflow_node_template;
 DROP TABLE IF EXISTS report_record;
 DROP TABLE IF EXISTS report_template;
 DROP TABLE IF EXISTS kb_chunk;
@@ -484,6 +485,18 @@ CREATE TABLE report_record (
   KEY idx_report_record_status (send_status),
   CONSTRAINT fk_report_record_template FOREIGN KEY (template_id) REFERENCES report_template (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='报表生成记录表';
+
+CREATE TABLE workflow_node_template (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+  template_key VARCHAR(128) NOT NULL COMMENT '组件唯一编码',
+  node_type VARCHAR(32) NOT NULL COMMENT '节点执行类型',
+  label VARCHAR(128) NOT NULL COMMENT '组件名称',
+  description VARCHAR(500) NULL COMMENT '组件说明',
+  deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标识，0未删除，1已删除',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  UNIQUE KEY uk_workflow_node_template_key (template_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='工作流共享节点组件表';
 
 CREATE TABLE workflow_definition (
   id BIGINT NOT NULL PRIMARY KEY COMMENT '主键ID',

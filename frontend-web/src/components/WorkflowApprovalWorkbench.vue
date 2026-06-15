@@ -74,6 +74,10 @@
             <div><span>实例ID</span><strong>{{ detail.instance.id }}</strong></div><div><span>业务类型</span><strong>{{ detail.instance.businessType }}</strong></div>
             <div><span>当前节点</span><strong>{{ detail.instance.currentNode }}</strong></div><div><span>发起人ID</span><strong>{{ detail.instance.initiatorUserId || "-" }}</strong></div>
           </div>
+          <div v-if="detail.instance.status === 'running'" class="workflow-instance-actions">
+            <button class="ghost-button" type="button" @click="remindSelectedInstance"><BellRing :size="15" />催办</button>
+            <button class="reject-button" type="button" @click="withdrawSelectedInstance"><Undo2 :size="15" />撤回</button>
+          </div>
           <WorkflowTimeline :detail="detail" />
         </template>
         <div v-else class="workflow-empty-detail"><Route :size="32" /><strong>选择流程查看完整轨迹</strong></div>
@@ -102,9 +106,18 @@
             <option value="">新建流程</option>
             <option v-for="item in definitions" :key="item.id" :value="item.id">{{ item.workflowName }} · V{{ item.versionNo }}</option>
           </select>
-          <button class="primary-button" type="button" @click="submitDefinition"><Save :size="16" />发布新版本</button>
+          <button class="ghost-button" type="button" @click="validateDefinition"><ShieldCheck :size="16" />校验</button>
+          <button class="ghost-button" type="button" @click="copyDefinition"><Copy :size="16" />复制</button>
+          <button class="ghost-button" type="button" :disabled="!previousDefinition" @click="showVersionCompare = !showVersionCompare"><History :size="16" />版本对比</button>
+          <button class="ghost-button" type="button" @click="submitDefinition('draft')"><Save :size="16" />保存草稿</button>
+          <button class="primary-button" type="button" @click="submitDefinition('enabled')"><Send :size="16" />发布新版本</button>
         </div>
       </div>
+      <section v-if="showVersionCompare && selectedDefinition && previousDefinition" class="workflow-version-compare">
+        <div><strong>当前版本 V{{ selectedDefinition.versionNo }}</strong><small>{{ versionNodeSummary(selectedDefinition) }}</small></div>
+        <div><strong>上一版本 V{{ previousDefinition.versionNo }}</strong><small>{{ versionNodeSummary(previousDefinition) }}</small></div>
+        <p>{{ versionDifference }}</p>
+      </section>
 
       <section class="workflow-designer">
         <aside class="workflow-palette">
@@ -166,6 +179,11 @@
             <label><span>节点编码</span><input v-model="selectedDesignerNode.code" /></label>
             <label><span>处理时限（小时）</span><input v-model.number="selectedDesignerNode.dueHours" type="number" min="1" /></label>
             <label><span>指定审批人用户ID</span><input v-model="selectedDesignerNode.assigneeUserId" placeholder="留空则按默认规则分配" /></label>
+            <label><span>多人处理人ID</span><input v-model="selectedDesignerNode.assigneeUserIdsText" placeholder="多个用户ID用逗号分隔" /></label>
+            <label><span>多人审批方式</span><select v-model="selectedDesignerNode.approvalMode"><option value="all">会签：全部通过</option><option value="any">并行：任一通过</option></select></label>
+            <label><span>条件变量</span><input v-model="selectedDesignerNode.conditionVariable" placeholder="例如 amount" /></label>
+            <label><span>条件判断</span><select v-model="selectedDesignerNode.conditionOperator"><option value="equals">等于</option><option value="not_equals">不等于</option><option value="contains">包含</option><option value="gt">大于</option><option value="gte">大于等于</option><option value="lt">小于</option><option value="lte">小于等于</option></select></label>
+            <label><span>条件值</span><input v-model="selectedDesignerNode.conditionValue" placeholder="留空表示始终执行" /></label>
             <button class="danger-text-button" type="button" @click="removeNode(selectedDesignerNode.uid)"><Trash2 :size="15" />删除节点</button>
           </template>
           <div v-else class="workflow-property-empty"><Settings2 :size="24" /><strong>选择节点编辑属性</strong></div>
@@ -178,11 +196,12 @@
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, ref, type Component, type PropType } from "vue";
-import { Bot, CheckCircle2, ClipboardCheck, Forward, GripVertical, History, Landmark, Play, PlusCircle, RefreshCw, Route, Save, Send, Settings2, ShieldCheck, Trash2, UserRoundCheck, XCircle } from "lucide-vue-next";
+import { BellRing, Bot, CheckCircle2, ClipboardCheck, Copy, Forward, GitFork, GripVertical, History, Landmark, Play, PlusCircle, RefreshCw, Route, Save, Send, Settings2, ShieldCheck, Split, Trash2, Undo2, UserRoundCheck, UsersRound, XCircle } from "lucide-vue-next";
 import {
-  fetchWorkflowDefinitions, fetchWorkflowDetail, fetchWorkflowInstances, fetchWorkflowTasks, handleWorkflowTask,
-  saveWorkflowDefinition, startWorkflowApproval, type WorkflowDefinition, type WorkflowInstance,
-  type WorkflowInstanceDetail, type WorkflowTask
+  deleteWorkflowNodeTemplate, fetchWorkflowDefinitions, fetchWorkflowDetail, fetchWorkflowInstances, fetchWorkflowNodeTemplates,
+  fetchWorkflowTasks, handleWorkflowTask, remindWorkflow, saveWorkflowDefinition, saveWorkflowNodeTemplate,
+  startWorkflowApproval, validateWorkflowDefinition, withdrawWorkflow, type WorkflowDefinition, type WorkflowInstance,
+  type WorkflowInstanceDetail, type WorkflowNodeTemplate, type WorkflowTask
 } from "../services/api";
 
 const WorkflowTimeline = defineComponent({
@@ -229,17 +248,23 @@ const definitionForm = ref({
   workflowCode: "custom_approval", workflowName: "自定义审批流程", scenario: "custom", status: "enabled",
   definitionJson: ""
 });
-type DesignerNode = { uid: string; type: string; code: string; name: string; dueHours: number; assigneeUserId?: string };
+type DesignerNode = {
+  uid: string; type: string; code: string; name: string; dueHours: number; assigneeUserId?: string; assigneeUserIdsText?: string;
+  approvalMode?: string; conditionVariable?: string; conditionOperator?: string; conditionValue?: string;
+};
 type NodeTemplate = { key: string; nodeType: string; label: string; description: string; icon: Component; custom?: boolean };
 type StoredNodeTemplate = Omit<NodeTemplate, "icon" | "custom">;
-const NODE_TEMPLATE_STORAGE_KEY = "qyglai-workflow-node-templates";
 const nodeTemplates: NodeTemplate[] = [
   { key: "approval", nodeType: "approval", label: "人工审批", description: "通用审批节点", icon: UserRoundCheck },
   { key: "department", nodeType: "department", label: "部门审批", description: "部门负责人处理", icon: ShieldCheck },
   { key: "finance", nodeType: "finance", label: "财务审批", description: "财务人员处理", icon: Landmark },
-  { key: "ai", nodeType: "ai", label: "AI 复核", description: "AI辅助检查节点", icon: Bot }
+  { key: "ai", nodeType: "ai", label: "AI 复核", description: "AI辅助检查节点", icon: Bot },
+  { key: "countersign", nodeType: "approval", label: "会签审批", description: "多人全部通过后流转", icon: UsersRound },
+  { key: "parallel", nodeType: "approval", label: "并行审批", description: "任一审批人通过后流转", icon: GitFork },
+  { key: "cc", nodeType: "cc", label: "抄送节点", description: "通知相关人员后自动流转", icon: BellRing },
+  { key: "condition", nodeType: "approval", label: "条件节点", description: "满足流程变量条件时执行", icon: Split }
 ];
-const customNodeTemplates = ref<StoredNodeTemplate[]>(loadCustomTemplates());
+const customNodeTemplates = ref<StoredNodeTemplate[]>([]);
 const allNodeTemplates = computed<NodeTemplate[]>(() => [
   ...nodeTemplates,
   ...customNodeTemplates.value.map((item) => ({ ...item, custom: true, icon: item.nodeType === "ai" ? Bot : UserRoundCheck }))
@@ -249,9 +274,31 @@ const templateDraft = ref({ label: "", description: "", nodeType: "approval" });
 const designerNodes = ref<DesignerNode[]>([]);
 const selectedNodeUid = ref("");
 const selectedDefinitionId = ref("");
+const showVersionCompare = ref(false);
 const draggedNodeIndex = ref<number | null>(null);
 const draggedTemplateType = ref("");
 const selectedDesignerNode = computed(() => designerNodes.value.find((node) => node.uid === selectedNodeUid.value));
+const selectedDefinition = computed(() => definitions.value.find((item) => item.id === selectedDefinitionId.value));
+const previousDefinition = computed(() => {
+  if (!selectedDefinition.value) return undefined;
+  return definitions.value
+    .filter((item) => item.workflowCode === selectedDefinition.value?.workflowCode && item.versionNo < selectedDefinition.value.versionNo)
+    .sort((a, b) => b.versionNo - a.versionNo)[0];
+});
+const versionDifference = computed(() => {
+  if (!selectedDefinition.value || !previousDefinition.value) return "";
+  const current = definitionNodeCodes(selectedDefinition.value);
+  const previous = definitionNodeCodes(previousDefinition.value);
+  const added = current.filter(code => !previous.includes(code));
+  const removed = previous.filter(code => !current.includes(code));
+  const orderChanged = !added.length && !removed.length && current.join("|") !== previous.join("|");
+  return [
+    added.length ? `新增节点：${added.join("、")}` : "",
+    removed.length ? `删除节点：${removed.join("、")}` : "",
+    orderChanged ? "节点顺序发生变化" : "",
+    !added.length && !removed.length && !orderChanged ? "节点编码及顺序未变化，请查看属性配置差异" : ""
+  ].filter(Boolean).join("；");
+});
 
 const enabledDefinitions = computed(() => definitions.value.filter((item) => item.status === "enabled"));
 const runningCount = computed(() => instances.value.filter((item) => item.status === "running").length);
@@ -261,7 +308,13 @@ onMounted(loadAll);
 
 async function loadAll() {
   try {
-    [definitions.value, instances.value, tasks.value] = await Promise.all([fetchWorkflowDefinitions(), fetchWorkflowInstances(), fetchWorkflowTasks()]);
+    const [definitionData, instanceData, taskData, templateData] = await Promise.all([
+      fetchWorkflowDefinitions(), fetchWorkflowInstances(), fetchWorkflowTasks(), fetchWorkflowNodeTemplates()
+    ]);
+    definitions.value = definitionData;
+    instances.value = instanceData;
+    tasks.value = taskData;
+    customNodeTemplates.value = templateData.map(mapNodeTemplate);
     if (!startForm.value.workflowCode && enabledDefinitions.value.length) startForm.value.workflowCode = enabledDefinitions.value[0].workflowCode;
     notice.value = "数据已刷新";
   } catch (error) {
@@ -276,6 +329,19 @@ async function selectTask(task: WorkflowTask) {
 
 async function selectInstance(id: string) {
   detail.value = await fetchWorkflowDetail(id);
+}
+
+async function remindSelectedInstance() {
+  if (!detail.value) return;
+  detail.value = await remindWorkflow(detail.value.instance.id);
+  notice.value = "已向当前待办处理人发送催办";
+}
+
+async function withdrawSelectedInstance() {
+  if (!detail.value) return;
+  detail.value = await withdrawWorkflow(detail.value.instance.id);
+  notice.value = "流程已撤回";
+  await loadAll();
 }
 
 async function act(action: string) {
@@ -309,24 +375,55 @@ async function submitStart() {
   }
 }
 
-async function submitDefinition() {
+async function submitDefinition(status = "enabled") {
   try {
-    if (!designerNodes.value.length) throw new Error("流程至少需要一个审批节点");
-    const codes = designerNodes.value.map((node) => node.code.trim());
-    if (codes.some((code) => !code)) throw new Error("节点编码不能为空");
-    if (new Set(codes).size !== codes.length) throw new Error("节点编码不能重复");
-    definitionForm.value.definitionJson = JSON.stringify({
-      nodes: designerNodes.value.map((node) => ({
-        type: node.type, code: node.code.trim(), name: node.name.trim() || node.code.trim(), dueHours: Math.max(1, Number(node.dueHours) || 24),
-        ...(node.assigneeUserId ? { assigneeUserId: Number(node.assigneeUserId) } : {})
-      }))
-    });
-    await saveWorkflowDefinition(definitionForm.value);
-    notice.value = "流程新版本已发布";
+    const payload = definitionPayload(status);
+    const issues = await validateWorkflowDefinition(payload);
+    if (issues.length) throw new Error(issues.join("；"));
+    await saveWorkflowDefinition(payload);
+    notice.value = status === "draft" ? "流程草稿已保存并共享" : "流程新版本已发布";
     await loadAll();
   } catch (error) {
     notice.value = errorMessage(error);
   }
+}
+
+async function validateDefinition() {
+  try {
+    const issues = await validateWorkflowDefinition(definitionPayload(definitionForm.value.status));
+    notice.value = issues.length ? `校验发现：${issues.join("；")}` : "流程校验通过，可以保存或发布";
+  } catch (error) {
+    notice.value = errorMessage(error);
+  }
+}
+
+function copyDefinition() {
+  definitionForm.value.workflowCode = `${definitionForm.value.workflowCode}_copy_${Date.now().toString().slice(-4)}`;
+  definitionForm.value.workflowName = `${definitionForm.value.workflowName}副本`;
+  selectedDefinitionId.value = "";
+  designerNodes.value = designerNodes.value.map((node) => ({ ...node, uid: uid() }));
+  selectedNodeUid.value = designerNodes.value[0]?.uid ?? "";
+  notice.value = "已复制为新流程，修改编码和名称后可保存";
+}
+
+function definitionPayload(status: string) {
+  if (!designerNodes.value.length) throw new Error("流程至少需要一个审批节点");
+  const nodes = designerNodes.value.map((node) => {
+    const assigneeUserIds = (node.assigneeUserIdsText ?? "").split(",").map(value => value.trim()).filter(Boolean).map(Number);
+    return {
+      type: node.type, code: node.code.trim(), name: node.name.trim() || node.code.trim(),
+      dueHours: Math.max(1, Number(node.dueHours) || 24), approvalMode: node.approvalMode ?? "all",
+      ...(node.assigneeUserId ? { assigneeUserId: Number(node.assigneeUserId) } : {}),
+      ...(assigneeUserIds.length ? { assigneeUserIds } : {}),
+      ...(node.conditionVariable ? {
+        conditionVariable: node.conditionVariable.trim(),
+        conditionOperator: node.conditionOperator ?? "equals",
+        conditionValue: node.conditionValue ?? ""
+      } : {})
+    };
+  });
+  definitionForm.value.definitionJson = JSON.stringify({ nodes });
+  return { ...definitionForm.value, status, definitionJson: definitionForm.value.definitionJson };
 }
 
 function uid() {
@@ -337,7 +434,9 @@ function addNode(templateKey: string, index = designerNodes.value.length) {
   const template = allNodeTemplates.value.find((item) => item.key === templateKey) ?? nodeTemplates[0];
   const sequence = designerNodes.value.length + 1;
   const node: DesignerNode = {
-    uid: uid(), type: template.nodeType, code: `${template.key}_review_${sequence}`, name: template.label, dueHours: 24
+    uid: uid(), type: template.nodeType, code: `${template.key}_review_${sequence}`, name: template.label, dueHours: 24,
+    approvalMode: template.key === "parallel" ? "any" : "all", conditionOperator: "equals",
+    conditionVariable: template.key === "condition" ? "amount" : "", conditionValue: template.key === "condition" ? "100000" : ""
   };
   designerNodes.value.splice(index, 0, node);
   selectedNodeUid.value = node.uid;
@@ -386,40 +485,31 @@ function removeNode(uidValue: string) {
   if (selectedNodeUid.value === uidValue) selectedNodeUid.value = designerNodes.value[0]?.uid ?? "";
 }
 
-function loadCustomTemplates(): StoredNodeTemplate[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(NODE_TEMPLATE_STORAGE_KEY) ?? "[]");
-    return Array.isArray(value) ? value.filter((item) => item?.key && item?.label && item?.nodeType) : [];
-  } catch {
-    return [];
-  }
-}
-
-function persistCustomTemplates() {
-  localStorage.setItem(NODE_TEMPLATE_STORAGE_KEY, JSON.stringify(customNodeTemplates.value));
-}
-
-function createCustomTemplate() {
+async function createCustomTemplate() {
   const label = templateDraft.value.label.trim();
   if (!label) return;
   const key = `custom_${Date.now()}`;
-  customNodeTemplates.value.push({
-    key,
+  const saved = await saveWorkflowNodeTemplate({
+    templateKey: key,
     nodeType: templateDraft.value.nodeType,
     label,
     description: templateDraft.value.description.trim() || (templateDraft.value.nodeType === "ai" ? "自定义 AI 复核节点" : "自定义人工处理节点")
   });
-  persistCustomTemplates();
+  customNodeTemplates.value.push(mapNodeTemplate(saved));
   templateDraft.value = { label: "", description: "", nodeType: "approval" };
   showTemplateCreator.value = false;
   notice.value = `节点组件“${label}”已创建`;
 }
 
-function removeCustomTemplate(key: string) {
+async function removeCustomTemplate(key: string) {
   const template = customNodeTemplates.value.find((item) => item.key === key);
+  await deleteWorkflowNodeTemplate(key);
   customNodeTemplates.value = customNodeTemplates.value.filter((item) => item.key !== key);
-  persistCustomTemplates();
   notice.value = template ? `节点组件“${template.label}”已删除，画布中的已有节点不受影响` : "节点组件已删除";
+}
+
+function mapNodeTemplate(item: WorkflowNodeTemplate): StoredNodeTemplate {
+  return { key: item.templateKey, nodeType: item.nodeType, label: item.label, description: item.description ?? "" };
 }
 
 function nodeIcon(type: string) {
@@ -427,6 +517,7 @@ function nodeIcon(type: string) {
 }
 
 function loadSelectedDefinition() {
+  showVersionCompare.value = false;
   const definition = definitions.value.find((item) => item.id === selectedDefinitionId.value);
   if (!definition) {
     definitionForm.value = { workflowCode: "custom_approval", workflowName: "自定义审批流程", scenario: "custom", status: "enabled", definitionJson: "" };
@@ -444,8 +535,11 @@ function loadSelectedDefinition() {
       if (typeof node === "string") return { uid: uid(), type: "approval", code: node, name: node, dueHours: 24 };
       const code = String(node.code ?? `approval_${index + 1}`);
       return {
-        uid: uid(), type: inferNodeType(code), code, name: String(node.name ?? code),
-        dueHours: Number(node.dueHours ?? 24), assigneeUserId: node.assigneeUserId ? String(node.assigneeUserId) : ""
+        uid: uid(), type: String(node.type ?? inferNodeType(code)), code, name: String(node.name ?? code),
+        dueHours: Number(node.dueHours ?? 24), assigneeUserId: node.assigneeUserId ? String(node.assigneeUserId) : "",
+        assigneeUserIdsText: Array.isArray(node.assigneeUserIds) ? node.assigneeUserIds.join(",") : "",
+        approvalMode: String(node.approvalMode ?? "all"), conditionVariable: String(node.conditionVariable ?? ""),
+        conditionOperator: String(node.conditionOperator ?? "equals"), conditionValue: String(node.conditionValue ?? "")
       };
     });
     selectedNodeUid.value = designerNodes.value[0]?.uid ?? "";
@@ -455,6 +549,18 @@ function loadSelectedDefinition() {
     selectedNodeUid.value = "";
     notice.value = "原流程定义无法解析，请重新设计";
   }
+}
+
+function definitionNodeCodes(item: WorkflowDefinition): string[] {
+  try {
+    return JSON.parse(item.definitionJson).nodes.map((node: string | { code?: string }) => typeof node === "string" ? node : node.code ?? "");
+  } catch {
+    return [];
+  }
+}
+
+function versionNodeSummary(item: WorkflowDefinition) {
+  return `${item.status === "draft" ? "草稿" : "已发布"} · ${nodeNames(item).join(" → ")}`;
 }
 
 function inferNodeType(code: string) {
@@ -477,11 +583,11 @@ function nodeNames(item: WorkflowDefinition) {
 }
 
 function statusLabel(value: string) {
-  return ({ running: "审批中", approved: "已通过", rejected: "已驳回", pending: "待审批" } as Record<string, string>)[value] || value;
+  return ({ running: "审批中", approved: "已通过", rejected: "已驳回", pending: "待审批", withdrawn: "已撤回" } as Record<string, string>)[value] || value;
 }
 
 function actionLabel(value: string) {
-  return ({ start: "发起审批", arrive: "进入节点", approve: "审批通过", approved: "审批通过", reject: "审批驳回", rejected: "审批驳回", transfer: "任务转交", complete: "流程完成", ai_auto_approved: "AI 复核自动通过", ai_manual_review: "AI 复核转人工" } as Record<string, string>)[value] || value;
+  return ({ start: "发起审批", arrive: "进入节点", approve: "审批通过", approved: "审批通过", reject: "审批驳回", rejected: "审批驳回", transfer: "任务转交", complete: "流程完成", remind: "审批催办", withdraw: "流程撤回", countersign_wait: "等待会签", ai_auto_approved: "AI 复核自动通过", ai_manual_review: "AI 复核转人工" } as Record<string, string>)[value] || value;
 }
 
 function formatDate(value?: string) {

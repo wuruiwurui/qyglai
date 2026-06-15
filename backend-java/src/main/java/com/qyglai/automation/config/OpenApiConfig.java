@@ -215,8 +215,14 @@ public class OpenApiConfig {
         add(docs, "GET", "/api/workflows/tasks", "查询待办审批任务");
         add(docs, "GET", "/api/workflows/definitions", "查询流程定义");
         add(docs, "POST", "/api/workflows/definitions", "保存流程定义");
+        add(docs, "POST", "/api/workflows/definitions/validate", "发布前校验流程定义");
+        add(docs, "GET", "/api/workflows/node-templates", "查询共享节点组件");
+        add(docs, "POST", "/api/workflows/node-templates", "保存共享节点组件");
+        add(docs, "DELETE", "/api/workflows/node-templates/{key}", "删除共享节点组件");
         add(docs, "GET", "/api/workflows/instances", "查询流程实例");
         add(docs, "GET", "/api/workflows/instances/{instanceId}", "查询流程实例详情");
+        add(docs, "POST", "/api/workflows/instances/{instanceId}/remind", "催办审批流程");
+        add(docs, "POST", "/api/workflows/instances/{instanceId}/withdraw", "撤回审批流程");
         add(docs, "POST", "/api/workflows/tasks/{taskId}/actions", "执行审批任务操作");
         return docs;
     }
