@@ -108,11 +108,23 @@
 
       <section class="workflow-designer">
         <aside class="workflow-palette">
-          <div><strong>节点组件</strong><small>拖入画布或点击添加</small></div>
-          <button v-for="item in nodeTemplates" :key="item.type" type="button" draggable="true" @dragstart="startPaletteDrag(item.type, $event)" @dragend="resetDrag" @click="addNode(item.type)">
-            <span :class="`workflow-palette-icon ${item.type}`"><component :is="item.icon" :size="16" /></span>
-            <span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
-          </button>
+          <div class="workflow-palette-heading">
+            <span><strong>节点组件</strong><small>拖入画布或点击添加</small></span>
+            <button type="button" title="新增节点组件" @click="showTemplateCreator = !showTemplateCreator"><PlusCircle :size="16" /></button>
+          </div>
+          <form v-if="showTemplateCreator" class="workflow-template-creator" @submit.prevent="createCustomTemplate">
+            <label><span>组件名称</span><input v-model="templateDraft.label" required maxlength="20" placeholder="例如：法务审批" /></label>
+            <label><span>执行方式</span><select v-model="templateDraft.nodeType"><option value="approval">人工处理</option><option value="ai">AI 自动复核</option></select></label>
+            <label><span>组件说明</span><input v-model="templateDraft.description" maxlength="40" placeholder="说明节点用途" /></label>
+            <div><button type="button" @click="showTemplateCreator = false">取消</button><button class="primary-button" type="submit">保存组件</button></div>
+          </form>
+          <article v-for="item in allNodeTemplates" :key="item.key" class="workflow-palette-item">
+            <button type="button" draggable="true" @dragstart="startPaletteDrag(item.key, $event)" @dragend="resetDrag" @click="addNode(item.key)">
+              <span :class="`workflow-palette-icon ${item.nodeType}`"><component :is="item.icon" :size="16" /></span>
+              <span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
+            </button>
+            <button v-if="item.custom" type="button" title="删除自定义组件" @click="removeCustomTemplate(item.key)"><Trash2 :size="13" /></button>
+          </article>
         </aside>
 
         <section class="workflow-canvas" @dragover.prevent @drop="dropOnCanvas">
@@ -218,12 +230,22 @@ const definitionForm = ref({
   definitionJson: ""
 });
 type DesignerNode = { uid: string; type: string; code: string; name: string; dueHours: number; assigneeUserId?: string };
-const nodeTemplates: { type: string; label: string; description: string; icon: Component }[] = [
-  { type: "approval", label: "人工审批", description: "通用审批节点", icon: UserRoundCheck },
-  { type: "department", label: "部门审批", description: "部门负责人处理", icon: ShieldCheck },
-  { type: "finance", label: "财务审批", description: "财务人员处理", icon: Landmark },
-  { type: "ai", label: "AI 复核", description: "AI辅助检查节点", icon: Bot }
+type NodeTemplate = { key: string; nodeType: string; label: string; description: string; icon: Component; custom?: boolean };
+type StoredNodeTemplate = Omit<NodeTemplate, "icon" | "custom">;
+const NODE_TEMPLATE_STORAGE_KEY = "qyglai-workflow-node-templates";
+const nodeTemplates: NodeTemplate[] = [
+  { key: "approval", nodeType: "approval", label: "人工审批", description: "通用审批节点", icon: UserRoundCheck },
+  { key: "department", nodeType: "department", label: "部门审批", description: "部门负责人处理", icon: ShieldCheck },
+  { key: "finance", nodeType: "finance", label: "财务审批", description: "财务人员处理", icon: Landmark },
+  { key: "ai", nodeType: "ai", label: "AI 复核", description: "AI辅助检查节点", icon: Bot }
 ];
+const customNodeTemplates = ref<StoredNodeTemplate[]>(loadCustomTemplates());
+const allNodeTemplates = computed<NodeTemplate[]>(() => [
+  ...nodeTemplates,
+  ...customNodeTemplates.value.map((item) => ({ ...item, custom: true, icon: item.nodeType === "ai" ? Bot : UserRoundCheck }))
+]);
+const showTemplateCreator = ref(false);
+const templateDraft = ref({ label: "", description: "", nodeType: "approval" });
 const designerNodes = ref<DesignerNode[]>([]);
 const selectedNodeUid = ref("");
 const selectedDefinitionId = ref("");
@@ -311,20 +333,21 @@ function uid() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function addNode(type: string, index = designerNodes.value.length) {
-  const template = nodeTemplates.find((item) => item.type === type) ?? nodeTemplates[0];
+function addNode(templateKey: string, index = designerNodes.value.length) {
+  const template = allNodeTemplates.value.find((item) => item.key === templateKey) ?? nodeTemplates[0];
   const sequence = designerNodes.value.length + 1;
   const node: DesignerNode = {
-    uid: uid(), type: template.type, code: `${template.type}_review_${sequence}`, name: template.label, dueHours: 24
+    uid: uid(), type: template.nodeType, code: `${template.key}_review_${sequence}`, name: template.label, dueHours: 24
   };
   designerNodes.value.splice(index, 0, node);
   selectedNodeUid.value = node.uid;
+  notice.value = `已添加节点：${template.label}`;
 }
 
-function startPaletteDrag(type: string, event: DragEvent) {
-  draggedTemplateType.value = type;
+function startPaletteDrag(templateKey: string, event: DragEvent) {
+  draggedTemplateType.value = templateKey;
   draggedNodeIndex.value = null;
-  event.dataTransfer?.setData("text/plain", `workflow-template:${type}`);
+  event.dataTransfer?.setData("text/plain", `workflow-template:${templateKey}`);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "copy";
 }
 
@@ -363,8 +386,44 @@ function removeNode(uidValue: string) {
   if (selectedNodeUid.value === uidValue) selectedNodeUid.value = designerNodes.value[0]?.uid ?? "";
 }
 
+function loadCustomTemplates(): StoredNodeTemplate[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(NODE_TEMPLATE_STORAGE_KEY) ?? "[]");
+    return Array.isArray(value) ? value.filter((item) => item?.key && item?.label && item?.nodeType) : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistCustomTemplates() {
+  localStorage.setItem(NODE_TEMPLATE_STORAGE_KEY, JSON.stringify(customNodeTemplates.value));
+}
+
+function createCustomTemplate() {
+  const label = templateDraft.value.label.trim();
+  if (!label) return;
+  const key = `custom_${Date.now()}`;
+  customNodeTemplates.value.push({
+    key,
+    nodeType: templateDraft.value.nodeType,
+    label,
+    description: templateDraft.value.description.trim() || (templateDraft.value.nodeType === "ai" ? "自定义 AI 复核节点" : "自定义人工处理节点")
+  });
+  persistCustomTemplates();
+  templateDraft.value = { label: "", description: "", nodeType: "approval" };
+  showTemplateCreator.value = false;
+  notice.value = `节点组件“${label}”已创建`;
+}
+
+function removeCustomTemplate(key: string) {
+  const template = customNodeTemplates.value.find((item) => item.key === key);
+  customNodeTemplates.value = customNodeTemplates.value.filter((item) => item.key !== key);
+  persistCustomTemplates();
+  notice.value = template ? `节点组件“${template.label}”已删除，画布中的已有节点不受影响` : "节点组件已删除";
+}
+
 function nodeIcon(type: string) {
-  return nodeTemplates.find((item) => item.type === type)?.icon ?? UserRoundCheck;
+  return nodeTemplates.find((item) => item.nodeType === type)?.icon ?? UserRoundCheck;
 }
 
 function loadSelectedDefinition() {
