@@ -43,6 +43,7 @@ public class WorkflowApprovalService {
     private final BusinessApprovalStatusService businessApprovalStatusService;
     private final WorkflowAiNodeService workflowAiNodeService;
     private final ObjectMapper objectMapper;
+    private final DataPermissionService dataPermissionService;
 
     public WorkflowApprovalService(WorkflowDefinitionMapper definitionMapper,
                                    WorkflowInstanceMapper instanceMapper,
@@ -51,7 +52,8 @@ public class WorkflowApprovalService {
                                    AuditService auditService,
                                    BusinessApprovalStatusService businessApprovalStatusService,
                                    WorkflowAiNodeService workflowAiNodeService,
-                                   ObjectMapper objectMapper) {
+                                   ObjectMapper objectMapper,
+                                   DataPermissionService dataPermissionService) {
         this.definitionMapper = definitionMapper;
         this.instanceMapper = instanceMapper;
         this.taskMapper = taskMapper;
@@ -60,6 +62,7 @@ public class WorkflowApprovalService {
         this.businessApprovalStatusService = businessApprovalStatusService;
         this.workflowAiNodeService = workflowAiNodeService;
         this.objectMapper = objectMapper;
+        this.dataPermissionService = dataPermissionService;
     }
 
     /** 查询启用和停用的全部流程定义。 */
@@ -187,8 +190,14 @@ public class WorkflowApprovalService {
 
     /** 查询全部流程实例。 */
     public List<WorkflowInstanceEntity> listInstances() {
-        return instanceMapper.selectList(new LambdaQueryWrapper<WorkflowInstanceEntity>()
-                .orderByDesc(WorkflowInstanceEntity::getStartedAt));
+        return listInstances(null, true);
+    }
+
+    public List<WorkflowInstanceEntity> listInstances(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<WorkflowInstanceEntity> query = new LambdaQueryWrapper<WorkflowInstanceEntity>()
+                .orderByDesc(WorkflowInstanceEntity::getStartedAt);
+        dataPermissionService.applyOwnerScope(query, WorkflowInstanceEntity::getInitiatorUserId, userId, viewAll);
+        return instanceMapper.selectList(query);
     }
 
     /** 查询业务记录关联的审批实例。 */
@@ -216,7 +225,18 @@ public class WorkflowApprovalService {
 
     /** 查询流程实例、任务节点和审批历史。 */
     public WorkflowInstanceDetail detail(Long instanceId) {
+        return buildDetail(requireInstance(instanceId));
+    }
+
+    /** 按数据权限查询流程实例详情，普通用户只能查看自己发起或经手的流程。 */
+    public WorkflowInstanceDetail detail(Long instanceId, Long userId, boolean viewAll) {
         WorkflowInstanceEntity instance = requireInstance(instanceId);
+        assertCanViewInstance(instance, userId, viewAll);
+        return buildDetail(instance);
+    }
+
+    private WorkflowInstanceDetail buildDetail(WorkflowInstanceEntity instance) {
+        Long instanceId = instance.getId();
         WorkflowDefinitionEntity definition = definitionMapper.selectById(instance.getDefinitionId());
         List<WorkflowTaskEntity> tasks = taskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>()
                 .eq(WorkflowTaskEntity::getInstanceId, instanceId)
@@ -230,7 +250,14 @@ public class WorkflowApprovalService {
     /** 记录催办动作，通知通道后续可消费该审计事实。 */
     @Transactional(rollbackFor = Exception.class)
     public WorkflowInstanceDetail remind(Long instanceId, Long operatorUserId) {
+        return remind(instanceId, operatorUserId, true);
+    }
+
+    /** 记录催办动作，普通用户只能催办自己可见的流程。 */
+    @Transactional(rollbackFor = Exception.class)
+    public WorkflowInstanceDetail remind(Long instanceId, Long operatorUserId, boolean viewAll) {
         WorkflowInstanceEntity instance = requireInstance(instanceId);
+        assertCanViewInstance(instance, operatorUserId, viewAll);
         if (!"running".equals(instance.getStatus())) throw new IllegalArgumentException("仅运行中的流程可以催办");
         List<WorkflowTaskEntity> pending = taskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>()
                 .eq(WorkflowTaskEntity::getInstanceId, instanceId).eq(WorkflowTaskEntity::getStatus, "pending"));
@@ -240,7 +267,7 @@ public class WorkflowApprovalService {
                     task.getAssigneeUserId(), "审批催办");
         }
         auditService.record("WORKFLOW_REMIND", "催办审批流程", "workflow_instance", instanceId);
-        return detail(instanceId);
+        return detail(instanceId, operatorUserId, viewAll);
     }
 
     /** 发起人或管理员撤回流程，并关闭全部未处理任务。 */
@@ -270,6 +297,9 @@ public class WorkflowApprovalService {
         }
         if (!administrator && !operatorUserId.equals(task.getAssigneeUserId())) {
             throw new IllegalArgumentException("当前用户不是该任务处理人");
+        }
+        if ("reject".equalsIgnoreCase(request.action()) && (request.comment() == null || request.comment().isBlank())) {
+            throw new IllegalArgumentException("驳回审批必须填写处理意见");
         }
         // 所有动作都在同一事务内更新任务、实例、业务状态和审批日志。
         return switch (request.action().toLowerCase()) {
@@ -345,6 +375,12 @@ public class WorkflowApprovalService {
     private WorkflowInstanceDetail transfer(WorkflowTaskEntity task, String comment, Long targetUserId, Long operatorUserId) {
         if (targetUserId == null) {
             throw new IllegalArgumentException("转交时必须指定目标用户");
+        }
+        if (targetUserId <= 0) {
+            throw new IllegalArgumentException("转交目标用户ID不正确");
+        }
+        if (targetUserId.equals(operatorUserId)) {
+            throw new IllegalArgumentException("审批任务不能转交给自己");
         }
         completeTask(task, "transferred", comment, operatorUserId);
         WorkflowTaskEntity replacement = new WorkflowTaskEntity();
@@ -598,6 +634,19 @@ public class WorkflowApprovalService {
             throw new IllegalArgumentException("流程实例不存在");
         }
         return instance;
+    }
+
+    private void assertCanViewInstance(WorkflowInstanceEntity instance, Long userId, boolean viewAll) {
+        if (viewAll) {
+            return;
+        }
+        boolean initiator = userId != null && userId.equals(instance.getInitiatorUserId());
+        Long taskCount = userId == null ? 0L : taskMapper.selectCount(new LambdaQueryWrapper<WorkflowTaskEntity>()
+                .eq(WorkflowTaskEntity::getInstanceId, instance.getId())
+                .eq(WorkflowTaskEntity::getAssigneeUserId, userId));
+        if (!initiator && taskCount == 0) {
+            throw new IllegalArgumentException("当前用户无权查看该流程实例");
+        }
     }
 
     private WorkflowInstanceSummary summary(WorkflowInstanceEntity instance, String workflowCode) {

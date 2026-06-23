@@ -97,20 +97,23 @@ public class WorkflowController {
 
     /** 查询全部流程实例。 */
     @GetMapping("/instances")
-    public ApiResponse<List<WorkflowInstanceEntity>> instances() {
-        return ApiResponse.ok(service.listInstances());
+    public ApiResponse<List<WorkflowInstanceEntity>> instances(Authentication authentication) {
+        JwtPrincipal principal = principal(authentication);
+        return ApiResponse.ok(service.listInstances(principal.userId(), principal.permissions().contains("*")));
     }
 
     /** 查询流程实例详情和审批历史。 */
     @GetMapping("/instances/{instanceId}")
-    public ApiResponse<WorkflowInstanceDetail> detail(@PathVariable Long instanceId) {
-        return ApiResponse.ok(service.detail(instanceId));
+    public ApiResponse<WorkflowInstanceDetail> detail(@PathVariable Long instanceId, Authentication authentication) {
+        JwtPrincipal principal = principal(authentication);
+        return ApiResponse.ok(service.detail(instanceId, principal.userId(), principal.permissions().contains("*")));
     }
 
     /** 催办当前流程的全部待办任务。 */
     @PostMapping("/instances/{instanceId}/remind")
     public ApiResponse<WorkflowInstanceDetail> remind(@PathVariable Long instanceId, Authentication authentication) {
-        return ApiResponse.ok(service.remind(instanceId, principal(authentication).userId()));
+        JwtPrincipal principal = principal(authentication);
+        return ApiResponse.ok(service.remind(instanceId, principal.userId(), principal.permissions().contains("*")));
     }
 
     /** 发起人撤回仍在运行中的流程。 */

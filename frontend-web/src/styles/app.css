@@ -1971,12 +1971,19 @@ th {
 .workflow-tabs .ghost-button { margin-left: auto; }
 .workflow-columns { display: grid; grid-template-columns: minmax(300px, .78fr) minmax(460px, 1.45fr); gap: 16px; min-height: 560px; }
 .workflow-list-panel, .workflow-detail-panel, .workflow-form-band { background: #fff; border: 1px solid #dfe6e3; border-radius: 8px; padding: 18px; }
+.workflow-filter-bar { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 8px; margin: 12px 0 6px; }
+.workflow-filter-bar label { display: grid; gap: 5px; color: #718079; font-size: 12px; }
+.workflow-filter-bar input, .workflow-filter-bar select { width: 100%; min-height: 36px; padding: 7px 9px; color: #1a2823; background: #fff; border: 1px solid #ccd7d2; border-radius: 6px; outline: 0; }
+.workflow-filter-bar input:focus, .workflow-filter-bar select:focus { border-color: #60b897; box-shadow: 0 0 0 2px rgba(8, 122, 87, .09); }
 .workflow-list-item { width: 100%; display: grid; grid-template-columns: 36px 1fr auto; align-items: center; gap: 10px; padding: 13px 8px; border: 0; border-bottom: 1px solid #edf1ef; background: transparent; text-align: left; cursor: pointer; }
 .workflow-list-item:hover, .workflow-list-item.active { background: #f2f8f5; }
+.workflow-list-item.overdue { background: #fff8f7; }
 .workflow-list-item span:nth-child(2) { display: grid; gap: 4px; min-width: 0; }
 .workflow-list-item strong { color: #1a2823; }
 .workflow-list-item small { color: #78857f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .workflow-list-item em { padding: 4px 7px; border-radius: 5px; background: #fff5d8; color: #916a00; font-size: 11px; font-style: normal; }
+.workflow-list-item em.overdue { background: #fff0ef; color: #b8322a; }
+.workflow-list-item em.today { background: #e8f5ef; color: #087a57; }
 .workflow-list-item em.approved { background: #e9f7ef; color: #087a57; }
 .workflow-list-item em.rejected { background: #fff0ef; color: #b8322a; }
 .workflow-node-icon { width: 32px; height: 32px; display: grid; place-items: center; color: #087a57; background: #e8f5ef; border-radius: 6px; }
@@ -3658,6 +3665,30 @@ tbody tr.selected {
 .workflow-version-compare p {
   grid-column: 1 / -1;
   margin: 0;
+}
+
+.workflow-validation-panel {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 14px;
+  padding: 12px 14px;
+  color: #7a4f00;
+  background: #fff8e6;
+  border: 1px solid #ead8a9;
+  border-radius: 8px;
+}
+
+.workflow-validation-panel strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workflow-validation-panel ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .workflow-palette,

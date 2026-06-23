@@ -4,7 +4,9 @@ import java.util.List;
 
 import com.qyglai.automation.common.ApiResponse;
 import com.qyglai.automation.dto.SalesFollowupTask;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,8 +24,8 @@ public class SalesController {
     }
 
     @GetMapping("/followups")
-    public ApiResponse<List<SalesFollowupTask>> followups() {
-        return ApiResponse.ok(service.listSalesFollowups());
+    public ApiResponse<List<SalesFollowupTask>> followups(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listSalesFollowups(principal.userId(), principal.permissions().contains("*")));
     }
 }
-

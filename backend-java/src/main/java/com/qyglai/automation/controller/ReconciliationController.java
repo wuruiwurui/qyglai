@@ -6,7 +6,9 @@ import com.qyglai.automation.common.ApiResponse;
 import com.qyglai.automation.dto.SimpleCreateRequest;
 import com.qyglai.automation.entity.ReconciliationBatchEntity;
 import com.qyglai.automation.entity.ReconciliationItemEntity;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.ReconciliationService;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,8 +37,10 @@ public class ReconciliationController {
      * @return 对账批次
      */
     @PostMapping("/batches")
-    public ApiResponse<ReconciliationBatchEntity> createBatch(@RequestBody SimpleCreateRequest request) {
-        return ApiResponse.ok(service.createBatch(request));
+    public ApiResponse<ReconciliationBatchEntity> createBatch(@RequestBody SimpleCreateRequest request,
+                                                              Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.createBatch(request, principal.userId()));
     }
 
     /**
@@ -45,8 +49,9 @@ public class ReconciliationController {
      * @return 批次列表
      */
     @GetMapping("/batches")
-    public ApiResponse<List<ReconciliationBatchEntity>> batches() {
-        return ApiResponse.ok(service.listBatches());
+    public ApiResponse<List<ReconciliationBatchEntity>> batches(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listBatches(principal.userId(), principal.permissions().contains("*")));
     }
 
     /**
@@ -55,8 +60,8 @@ public class ReconciliationController {
      * @return 明细列表
      */
     @GetMapping("/items")
-    public ApiResponse<List<ReconciliationItemEntity>> items() {
-        return ApiResponse.ok(service.listItems());
+    public ApiResponse<List<ReconciliationItemEntity>> items(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listItems(principal.userId(), principal.permissions().contains("*")));
     }
 }
-

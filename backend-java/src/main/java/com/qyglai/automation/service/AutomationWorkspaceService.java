@@ -107,6 +107,7 @@ public class AutomationWorkspaceService {
     private final AiBusinessApplicationService aiBusinessApplicationService;
     private final ObjectMapper objectMapper;
     private final KnowledgeRagService knowledgeRagService;
+    private final DataPermissionService dataPermissionService;
 
     public AutomationWorkspaceService(ContractRecordMapper contractRecordMapper,
                                       ContractRiskItemMapper contractRiskItemMapper,
@@ -131,7 +132,8 @@ public class AutomationWorkspaceService {
                                       WorkflowApprovalService workflowApprovalService,
                                       AiBusinessApplicationService aiBusinessApplicationService,
                                       ObjectMapper objectMapper,
-                                      KnowledgeRagService knowledgeRagService) {
+                                      KnowledgeRagService knowledgeRagService,
+                                      DataPermissionService dataPermissionService) {
         this.contractRecordMapper = contractRecordMapper;
         this.contractRiskItemMapper = contractRiskItemMapper;
         this.fileAssetMapper = fileAssetMapper;
@@ -156,6 +158,7 @@ public class AutomationWorkspaceService {
         this.aiBusinessApplicationService = aiBusinessApplicationService;
         this.objectMapper = objectMapper;
         this.knowledgeRagService = knowledgeRagService;
+        this.dataPermissionService = dataPermissionService;
     }
 
     /**
@@ -167,6 +170,11 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public FileAssetEntity uploadFile(MultipartFile file, String businessType) {
+        return uploadFile(file, businessType, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public FileAssetEntity uploadFile(MultipartFile file, String businessType, Long ownerUserId) {
         try {
             Long fileId = IdWorker.getId();
             Path uploadDir = Path.of("storage", "uploads");
@@ -194,6 +202,8 @@ public class AutomationWorkspaceService {
             asset.setStorageBucket("local");
             asset.setStorageKey(target.toString());
             asset.setBusinessType(businessType == null || businessType.isBlank() ? "general" : businessType);
+            asset.setOwnerUserId(ownerUserId);
+            asset.setOrgId(dataPermissionService.userOrgId(ownerUserId));
             asset.setParseStatus("uploaded");
             fileAssetMapper.insert(asset);
             auditService.record("FILE_UPLOAD", "上传文件", "file_asset", fileId);
@@ -209,8 +219,14 @@ public class AutomationWorkspaceService {
      * @return 文件资产列表
      */
     public List<FileAssetEntity> listFiles() {
-        return fileAssetMapper.selectList(new LambdaQueryWrapper<FileAssetEntity>()
-                .orderByDesc(FileAssetEntity::getCreatedAt));
+        return listFiles(null, true);
+    }
+
+    public List<FileAssetEntity> listFiles(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<FileAssetEntity> query = new LambdaQueryWrapper<FileAssetEntity>()
+                .orderByDesc(FileAssetEntity::getCreatedAt);
+        dataPermissionService.applyOwnerOrgScope(query, FileAssetEntity::getOwnerUserId, FileAssetEntity::getOrgId, userId, viewAll);
+        return fileAssetMapper.selectList(query);
     }
 
     /**
@@ -220,7 +236,13 @@ public class AutomationWorkspaceService {
      * @return 文件资产详情
      */
     public FileAssetDetail getFileDetail(Long fileId) {
-        FileAssetEntity file = fileAssetMapper.selectById(fileId);
+        return getFileDetail(fileId, null, true);
+    }
+
+    public FileAssetDetail getFileDetail(Long fileId, Long userId, boolean viewAll) {
+        LambdaQueryWrapper<FileAssetEntity> fileQuery = new LambdaQueryWrapper<FileAssetEntity>().eq(FileAssetEntity::getId, fileId);
+        dataPermissionService.applyOwnerOrgScope(fileQuery, FileAssetEntity::getOwnerUserId, FileAssetEntity::getOrgId, userId, viewAll);
+        FileAssetEntity file = fileAssetMapper.selectOne(fileQuery);
         if (file == null) {
             throw new IllegalArgumentException("文件不存在: " + fileId);
         }
@@ -337,7 +359,7 @@ public class AutomationWorkspaceService {
     @Transactional(rollbackFor = Exception.class)
     public FileAiProcessResult processFileWithAi(MultipartFile file, String businessType, Long initiatorUserId) {
         // 第一步：保存原始文件，后续解析结果和业务记录都通过 fileId 与其关联。
-        FileAssetEntity asset = uploadFile(file, businessType);
+        FileAssetEntity asset = uploadFile(file, businessType, initiatorUserId);
         // 第二步：解析文本或执行 OCR，再由规则与真实模型协同完成结构化抽取。
         ParseAndExtractResponse aiResult = aiGatewayService.parseAndExtractFile(file, asset.getBusinessType());
         if (aiResult == null || aiResult.parsed() == null || aiResult.extraction() == null) {
@@ -351,7 +373,8 @@ public class AutomationWorkspaceService {
         ReviewTaskEntity reviewTask = null;
         if (aiResult.extraction().reviewRequired()) {
             // 模型明确要求复核或规则识别出风险时创建人工任务，不让高风险结果直接进入自动流程。
-            reviewTask = createReviewTask(aiResult.extraction().scenario(), businessType, extractBusinessId(businessRecord), "AI文件解析需要人工复核", riskLevel(aiResult.extraction()));
+            reviewTask = createReviewTask(aiResult.extraction().scenario(), businessType, extractBusinessId(businessRecord),
+                    "AI文件解析需要人工复核", riskLevel(aiResult.extraction()), initiatorUserId);
         }
         asset.setParseStatus("completed");
         fileAssetMapper.updateById(asset);
@@ -368,19 +391,19 @@ public class AutomationWorkspaceService {
         String scenario = extraction.scenario() == null ? "" : extraction.scenario().toLowerCase();
         // 上传时选择的业务类型优先，模型识别场景用于补充判断。
         if (businessType.contains("invoice") || scenario.contains("invoice")) {
-            return createInvoiceFromExtraction(asset.getId(), extraction);
+            return createInvoiceFromExtraction(asset, extraction);
         }
         if (businessType.contains("contract") || scenario.contains("contract")) {
-            return createContractFromExtraction(asset.getId(), extraction);
+            return createContractFromExtraction(asset, extraction);
         }
         return Map.of("fileId", asset.getId(), "message", "文件已解析，未匹配到专属业务台账，已保存解析结果");
     }
 
-    private ContractRecordEntity createContractFromExtraction(Long fileId, ExtractionResult extraction) {
+    private ContractRecordEntity createContractFromExtraction(FileAssetEntity asset, ExtractionResult extraction) {
         Map<String, String> fields = extraction.fields();
         ContractRecordEntity contract = new ContractRecordEntity();
         contract.setId(IdWorker.getId());
-        contract.setFileId(fileId);
+        contract.setFileId(asset.getId());
         contract.setContractNo("HT-AI-" + contract.getId());
         contract.setPartyA(firstPresent(fields, "party_a", "partyA", "甲方", "示例甲方有限公司"));
         contract.setPartyB(firstPresent(fields, "party_b", "partyB", "乙方", "示例乙方有限公司"));
@@ -389,6 +412,8 @@ public class AutomationWorkspaceService {
         contract.setPaymentTerms(firstPresent(fields, "payment_terms", "paymentTerm", "付款条款", "待确认"));
         contract.setRiskLevel(riskLevel(extraction));
         contract.setReviewStatus(extraction.reviewRequired() ? "pending" : "passed");
+        contract.setOwnerUserId(asset.getOwnerUserId());
+        contract.setOrgId(asset.getOrgId());
         contract.setDeleted(0);
         contract.setCreatedAt(LocalDateTime.now());
         contract.setUpdatedAt(LocalDateTime.now());
@@ -407,13 +432,13 @@ public class AutomationWorkspaceService {
         return contract;
     }
 
-    private InvoiceRecordEntity createInvoiceFromExtraction(Long fileId, ExtractionResult extraction) {
+    private InvoiceRecordEntity createInvoiceFromExtraction(FileAssetEntity asset, ExtractionResult extraction) {
         Map<String, String> fields = extraction.fields();
         InvoiceRecordEntity invoice = new InvoiceRecordEntity();
         invoice.setId(IdWorker.getId());
-        invoice.setFileId(fileId);
+        invoice.setFileId(asset.getId());
         invoice.setInvoiceNo(firstPresent(fields, "invoice_no", "invoiceNo", "FP-AI-" + invoice.getId()));
-        invoice.setInvoiceCode(firstPresent(fields, "invoice_code", "invoiceCode", "AI-" + fileId));
+        invoice.setInvoiceCode(firstPresent(fields, "invoice_code", "invoiceCode", "AI-" + asset.getId()));
         // 允许重复发票入库，但通过 duplicateFlag 明确标记，交由财务人员复核。
         boolean duplicateInvoice = findExistingInvoice(invoice.getInvoiceNo(), invoice.getInvoiceCode()) != null;
 
@@ -429,6 +454,8 @@ public class AutomationWorkspaceService {
         invoice.setTaxRate(firstPresent(fields, "tax_rate", "taxRate", "待确认"));
         invoice.setVerifyStatus(extraction.reviewRequired() ? "pending_review" : "passed");
         invoice.setDuplicateFlag(duplicateInvoice ? 1 : 0);
+        invoice.setOwnerUserId(asset.getOwnerUserId());
+        invoice.setOrgId(asset.getOrgId());
         invoice.setDeleted(0);
         invoice.setCreatedAt(LocalDateTime.now());
         invoice.setUpdatedAt(LocalDateTime.now());
@@ -588,6 +615,11 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ExtractionResult extractContract(TextProcessRequest request) {
+        return extractContract(request, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ExtractionResult extractContract(TextProcessRequest request, Long ownerUserId) {
         Long contractId = IdWorker.getId();
         ContractRecordEntity contract = new ContractRecordEntity();
         contract.setId(contractId);
@@ -599,6 +631,8 @@ public class AutomationWorkspaceService {
         contract.setPaymentTerms("验收后45日内付款");
         contract.setRiskLevel("medium");
         contract.setReviewStatus("pending");
+        contract.setOwnerUserId(ownerUserId);
+        contract.setOrgId(dataPermissionService.userOrgId(ownerUserId));
         contractRecordMapper.insert(contract);
 
         ContractRiskItemEntity risk = new ContractRiskItemEntity();
@@ -611,7 +645,7 @@ public class AutomationWorkspaceService {
         risk.setStatus("open");
         contractRiskItemMapper.insert(risk);
 
-        createReviewTask("CONTRACT", "contract_record", contractId, "合同付款周期需复核", "medium");
+        createReviewTask("CONTRACT", "contract_record", contractId, "合同付款周期需复核", "medium", ownerUserId);
         startWorkflow(new WorkflowStartRequest("contract_review", "system", Map.of("contractId", contractId)));
         auditService.record("CONTRACT_EXTRACT", "合同信息抽取", "contract_record", contractId);
         businessEventService.publish("contract.extracted", contractId, Map.of("contractNo", contract.getContractNo()));
@@ -636,8 +670,14 @@ public class AutomationWorkspaceService {
      * @return 合同列表
      */
     public List<ContractRecordEntity> listContracts() {
-        return contractRecordMapper.selectList(new LambdaQueryWrapper<ContractRecordEntity>()
-                .orderByDesc(ContractRecordEntity::getCreatedAt));
+        return listContracts(null, true);
+    }
+
+    public List<ContractRecordEntity> listContracts(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<ContractRecordEntity> query = new LambdaQueryWrapper<ContractRecordEntity>()
+                .orderByDesc(ContractRecordEntity::getCreatedAt);
+        dataPermissionService.applyOwnerOrgScope(query, ContractRecordEntity::getOwnerUserId, ContractRecordEntity::getOrgId, userId, viewAll);
+        return contractRecordMapper.selectList(query);
     }
 
     /**
@@ -648,6 +688,11 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ExtractionResult parseInvoice(TextProcessRequest request) {
+        return parseInvoice(request, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ExtractionResult parseInvoice(TextProcessRequest request, Long ownerUserId) {
         Long invoiceId = IdWorker.getId();
         InvoiceRecordEntity invoice = new InvoiceRecordEntity();
         invoice.setId(invoiceId);
@@ -662,6 +707,8 @@ public class AutomationWorkspaceService {
         invoice.setTaxRate("13%");
         invoice.setVerifyStatus("passed");
         invoice.setDuplicateFlag(0);
+        invoice.setOwnerUserId(ownerUserId);
+        invoice.setOrgId(dataPermissionService.userOrgId(ownerUserId));
         invoiceRecordMapper.insert(invoice);
         auditService.record("INVOICE_PARSE", "发票解析", "invoice_record", invoiceId);
         businessEventService.publish("invoice.parsed", invoiceId, Map.of("invoiceNo", invoice.getInvoiceNo()));
@@ -687,8 +734,14 @@ public class AutomationWorkspaceService {
      * @return 发票列表
      */
     public List<InvoiceRecordEntity> listInvoices() {
-        return invoiceRecordMapper.selectList(new LambdaQueryWrapper<InvoiceRecordEntity>()
-                .orderByDesc(InvoiceRecordEntity::getCreatedAt));
+        return listInvoices(null, true);
+    }
+
+    public List<InvoiceRecordEntity> listInvoices(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<InvoiceRecordEntity> query = new LambdaQueryWrapper<InvoiceRecordEntity>()
+                .orderByDesc(InvoiceRecordEntity::getCreatedAt);
+        dataPermissionService.applyOwnerOrgScope(query, InvoiceRecordEntity::getOwnerUserId, InvoiceRecordEntity::getOrgId, userId, viewAll);
+        return invoiceRecordMapper.selectList(query);
     }
 
     /**
@@ -737,7 +790,13 @@ public class AutomationWorkspaceService {
      * @return 工单列表
      */
     public List<TicketEntity> listTickets() {
-        return ticketMapper.selectList(new LambdaQueryWrapper<TicketEntity>().orderByDesc(TicketEntity::getCreatedAt));
+        return listTickets(null, true);
+    }
+
+    public List<TicketEntity> listTickets(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<TicketEntity> query = new LambdaQueryWrapper<TicketEntity>().orderByDesc(TicketEntity::getCreatedAt);
+        dataPermissionService.applyOwnerScope(query, TicketEntity::getAssigneeUserId, userId, viewAll);
+        return ticketMapper.selectList(query);
     }
 
     /**
@@ -746,8 +805,14 @@ public class AutomationWorkspaceService {
      * @return 销售跟进任务列表
      */
     public List<SalesFollowupTask> listSalesFollowups() {
-        return salesFollowupTaskMapper.selectList(new LambdaQueryWrapper<SalesFollowupTaskEntity>()
-                        .orderByAsc(SalesFollowupTaskEntity::getDueTime))
+        return listSalesFollowups(null, true);
+    }
+
+    public List<SalesFollowupTask> listSalesFollowups(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<SalesFollowupTaskEntity> query = new LambdaQueryWrapper<SalesFollowupTaskEntity>()
+                .orderByAsc(SalesFollowupTaskEntity::getDueTime);
+        dataPermissionService.applyOwnerScope(query, SalesFollowupTaskEntity::getOwnerUserId, userId, viewAll);
+        return salesFollowupTaskMapper.selectList(query)
                 .stream()
                 .map(task -> new SalesFollowupTask(
                         String.valueOf(task.getId()),
@@ -777,7 +842,13 @@ public class AutomationWorkspaceService {
      * @return 知识库空间列表
      */
     public List<KbSpaceEntity> listKnowledgeSpaces() {
-        return kbSpaceMapper.selectList(new LambdaQueryWrapper<KbSpaceEntity>().orderByDesc(KbSpaceEntity::getCreatedAt));
+        return listKnowledgeSpaces(null, true);
+    }
+
+    public List<KbSpaceEntity> listKnowledgeSpaces(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<KbSpaceEntity> query = new LambdaQueryWrapper<KbSpaceEntity>().orderByDesc(KbSpaceEntity::getCreatedAt);
+        dataPermissionService.applyOrgScope(query, KbSpaceEntity::getOwnerOrgId, userId, viewAll);
+        return kbSpaceMapper.selectList(query);
     }
 
     /**
@@ -788,6 +859,11 @@ public class AutomationWorkspaceService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ReportSummary generateReport(ReportGenerateRequest request) {
+        return generateReport(request, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ReportSummary generateReport(ReportGenerateRequest request, Long generatedBy) {
         // 报表中的业务数字先由 Java 查库汇总，模型只负责组织语言和章节结构。
         AiBusinessApplicationService.ReportContent generated = aiBusinessApplicationService.generateReport(request);
         Long reportId = IdWorker.getId();
@@ -798,6 +874,7 @@ public class AutomationWorkspaceService {
         record.setSummary(generated.summary());
         record.setContent(generated.content());
         record.setSourceJson(toJson(generated.sources()));
+        record.setGeneratedBy(generatedBy);
         record.setSendStatus(request.autoSend() ? "pending_confirmation" : "draft");
         reportRecordMapper.insert(record);
         auditService.record("REPORT_GENERATE", "生成报表", "report_record", reportId);
@@ -812,7 +889,13 @@ public class AutomationWorkspaceService {
      * @return 报表记录列表
      */
     public List<ReportRecordEntity> listReports() {
-        return reportRecordMapper.selectList(new LambdaQueryWrapper<ReportRecordEntity>().orderByDesc(ReportRecordEntity::getGeneratedAt));
+        return listReports(null, true);
+    }
+
+    public List<ReportRecordEntity> listReports(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<ReportRecordEntity> query = new LambdaQueryWrapper<ReportRecordEntity>().orderByDesc(ReportRecordEntity::getGeneratedAt);
+        dataPermissionService.applyOwnerScope(query, ReportRecordEntity::getGeneratedBy, userId, viewAll);
+        return reportRecordMapper.selectList(query);
     }
 
     /**
@@ -852,7 +935,13 @@ public class AutomationWorkspaceService {
      * @return 流程任务列表
      */
     public List<WorkflowTaskEntity> listWorkflowTasks() {
-        return workflowTaskMapper.selectList(new LambdaQueryWrapper<WorkflowTaskEntity>().orderByDesc(WorkflowTaskEntity::getCreatedAt));
+        return listWorkflowTasks(null, true);
+    }
+
+    public List<WorkflowTaskEntity> listWorkflowTasks(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<WorkflowTaskEntity> query = new LambdaQueryWrapper<WorkflowTaskEntity>().orderByDesc(WorkflowTaskEntity::getCreatedAt);
+        dataPermissionService.applyOwnerScope(query, WorkflowTaskEntity::getAssigneeUserId, userId, viewAll);
+        return workflowTaskMapper.selectList(query);
     }
 
     /**
@@ -861,8 +950,14 @@ public class AutomationWorkspaceService {
      * @return 人工复核任务列表
      */
     public List<ReviewTask> listReviewTasks() {
-        return reviewTaskMapper.selectList(new LambdaQueryWrapper<ReviewTaskEntity>()
-                        .orderByDesc(ReviewTaskEntity::getCreatedAt))
+        return listReviewTasks(null, true);
+    }
+
+    public List<ReviewTask> listReviewTasks(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<ReviewTaskEntity> query = new LambdaQueryWrapper<ReviewTaskEntity>()
+                .orderByDesc(ReviewTaskEntity::getCreatedAt);
+        dataPermissionService.applyOwnerScope(query, ReviewTaskEntity::getAssigneeUserId, userId, viewAll);
+        return reviewTaskMapper.selectList(query)
                 .stream()
                 .map(task -> new ReviewTask(String.valueOf(task.getId()), task.getScenario(), task.getTitle(),
                         task.getRiskLevel(), task.getAssigneeUserId() == null ? "未分配" : "用户-" + task.getAssigneeUserId(),
@@ -879,9 +974,16 @@ public class AutomationWorkspaceService {
      * @return 是否成功
      */
     public boolean completeReviewTask(Long taskId, String result) {
+        return completeReviewTask(taskId, result, null, true);
+    }
+
+    public boolean completeReviewTask(Long taskId, String result, Long userId, boolean viewAll) {
         ReviewTaskEntity task = reviewTaskMapper.selectById(taskId);
         if (task == null) {
             return false;
+        }
+        if (!viewAll && (task.getAssigneeUserId() == null || !task.getAssigneeUserId().equals(userId))) {
+            throw new IllegalArgumentException("当前用户不是该复核任务处理人");
         }
         task.setStatus("completed");
         // 同时保留原 AI 建议和人工结论，为后续评估模型准确率提供样本。
@@ -935,6 +1037,11 @@ public class AutomationWorkspaceService {
     }
 
     private ReviewTaskEntity createReviewTask(String scenario, String businessType, Long businessId, String title, String riskLevel) {
+        return createReviewTask(scenario, businessType, businessId, title, riskLevel, null);
+    }
+
+    private ReviewTaskEntity createReviewTask(String scenario, String businessType, Long businessId, String title,
+                                              String riskLevel, Long assigneeUserId) {
         AiBusinessApplicationService.ReviewDecision advice =
                 aiBusinessApplicationService.adviseReview(scenario, title, riskLevel);
         ReviewTaskEntity task = new ReviewTaskEntity();
@@ -944,6 +1051,7 @@ public class AutomationWorkspaceService {
         task.setBusinessId(businessId);
         task.setTitle(title);
         task.setRiskLevel(riskLevel);
+        task.setAssigneeUserId(assigneeUserId);
         task.setStatus("pending");
         task.setReviewResult(toJson(Map.of("aiAdvice", advice)));
         reviewTaskMapper.insert(task);

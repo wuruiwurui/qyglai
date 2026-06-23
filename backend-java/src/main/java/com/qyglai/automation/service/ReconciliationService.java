@@ -24,13 +24,16 @@ public class ReconciliationService {
     private final ReconciliationItemMapper itemMapper;
     private final AuditService auditService;
     private final AiBusinessApplicationService aiBusinessApplicationService;
+    private final DataPermissionService dataPermissionService;
 
     public ReconciliationService(ReconciliationBatchMapper batchMapper, ReconciliationItemMapper itemMapper,
-                                 AuditService auditService, AiBusinessApplicationService aiBusinessApplicationService) {
+                                 AuditService auditService, AiBusinessApplicationService aiBusinessApplicationService,
+                                 DataPermissionService dataPermissionService) {
         this.batchMapper = batchMapper;
         this.itemMapper = itemMapper;
         this.auditService = auditService;
         this.aiBusinessApplicationService = aiBusinessApplicationService;
+        this.dataPermissionService = dataPermissionService;
     }
 
     /**
@@ -41,6 +44,11 @@ public class ReconciliationService {
      */
     @Transactional(rollbackFor = Exception.class)
     public ReconciliationBatchEntity createBatch(SimpleCreateRequest request) {
+        return createBatch(request, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public ReconciliationBatchEntity createBatch(SimpleCreateRequest request, Long ownerUserId) {
         BigDecimal amount = request.amount() == null ? BigDecimal.ZERO : request.amount();
         ReconciliationBatchEntity batch = new ReconciliationBatchEntity();
         batch.setBatchNo(request.code() == null ? "REC-" + IdWorker.getId() : request.code());
@@ -50,6 +58,7 @@ public class ReconciliationService {
         batch.setExpectedAmount(amount);
         batch.setActualAmount(amount);
         batch.setDiffAmount(BigDecimal.ZERO);
+        batch.setOwnerUserId(ownerUserId);
         batch.setStatus("pending");
         batchMapper.insert(batch);
         AiBusinessApplicationService.ReconciliationDecision analysis =
@@ -75,7 +84,13 @@ public class ReconciliationService {
      * @return 对账批次列表
      */
     public List<ReconciliationBatchEntity> listBatches() {
-        return batchMapper.selectList(new LambdaQueryWrapper<ReconciliationBatchEntity>().orderByDesc(ReconciliationBatchEntity::getCreatedAt));
+        return listBatches(null, true);
+    }
+
+    public List<ReconciliationBatchEntity> listBatches(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<ReconciliationBatchEntity> query = new LambdaQueryWrapper<ReconciliationBatchEntity>().orderByDesc(ReconciliationBatchEntity::getCreatedAt);
+        dataPermissionService.applyOwnerScope(query, ReconciliationBatchEntity::getOwnerUserId, userId, viewAll);
+        return batchMapper.selectList(query);
     }
 
     /**
@@ -84,6 +99,14 @@ public class ReconciliationService {
      * @return 对账明细列表
      */
     public List<ReconciliationItemEntity> listItems() {
-        return itemMapper.selectList(new LambdaQueryWrapper<ReconciliationItemEntity>().orderByDesc(ReconciliationItemEntity::getCreatedAt));
+        return listItems(null, true);
+    }
+
+    public List<ReconciliationItemEntity> listItems(Long userId, boolean viewAll) {
+        List<Long> batchIds = listBatches(userId, viewAll).stream().map(ReconciliationBatchEntity::getId).toList();
+        if (batchIds.isEmpty()) return List.of();
+        return itemMapper.selectList(new LambdaQueryWrapper<ReconciliationItemEntity>()
+                .in(ReconciliationItemEntity::getBatchId, batchIds)
+                .orderByDesc(ReconciliationItemEntity::getCreatedAt));
     }
 }

@@ -55,12 +55,14 @@ public class KnowledgeRagService {
     private final AiCallLogService aiCallLogService;
     private final DoubaoEmbeddingService embeddingService;
     private final MilvusVectorStoreService milvusVectorStoreService;
+    private final DataPermissionService dataPermissionService;
 
     public KnowledgeRagService(KbSpaceMapper spaceMapper, KbDocumentMapper documentMapper,
                                KbChunkMapper chunkMapper, JavaAiModelGateway modelGateway,
                                AuditService auditService, ObjectMapper objectMapper,
                                AiCallLogService aiCallLogService, DoubaoEmbeddingService embeddingService,
-                               MilvusVectorStoreService milvusVectorStoreService) {
+                               MilvusVectorStoreService milvusVectorStoreService,
+                               DataPermissionService dataPermissionService) {
         this.spaceMapper = spaceMapper;
         this.documentMapper = documentMapper;
         this.chunkMapper = chunkMapper;
@@ -70,6 +72,7 @@ public class KnowledgeRagService {
         this.aiCallLogService = aiCallLogService;
         this.embeddingService = embeddingService;
         this.milvusVectorStoreService = milvusVectorStoreService;
+        this.dataPermissionService = dataPermissionService;
     }
 
     /**
@@ -268,16 +271,27 @@ public class KnowledgeRagService {
     }
 
     public List<KbSpaceEntity> listSpaces() {
-        return spaceMapper.selectList(new LambdaQueryWrapper<KbSpaceEntity>()
-                .eq(KbSpaceEntity::getStatus, "enabled").orderByDesc(KbSpaceEntity::getCreatedAt));
+        return listSpaces(null, true);
+    }
+
+    public List<KbSpaceEntity> listSpaces(Long userId, boolean viewAll) {
+        LambdaQueryWrapper<KbSpaceEntity> query = new LambdaQueryWrapper<KbSpaceEntity>()
+                .eq(KbSpaceEntity::getStatus, "enabled").orderByDesc(KbSpaceEntity::getCreatedAt);
+        dataPermissionService.applyOrgScope(query, KbSpaceEntity::getOwnerOrgId, userId, viewAll);
+        return spaceMapper.selectList(query);
     }
 
     public List<KbDocumentEntity> listDocuments(String scope) {
-        List<Long> spaceIds = spaceMapper.selectList(new LambdaQueryWrapper<KbSpaceEntity>()
+        return listDocuments(scope, null, true);
+    }
+
+    public List<KbDocumentEntity> listDocuments(String scope, Long userId, boolean viewAll) {
+        LambdaQueryWrapper<KbSpaceEntity> spaceQuery = new LambdaQueryWrapper<KbSpaceEntity>()
                         .eq(KbSpaceEntity::getStatus, "enabled")
                         .eq(scope != null && !scope.isBlank(),
-                                KbSpaceEntity::getPermissionScope, scope))
-                .stream().map(KbSpaceEntity::getId).toList();
+                                KbSpaceEntity::getPermissionScope, scope);
+        dataPermissionService.applyOrgScope(spaceQuery, KbSpaceEntity::getOwnerOrgId, userId, viewAll);
+        List<Long> spaceIds = spaceMapper.selectList(spaceQuery).stream().map(KbSpaceEntity::getId).toList();
         if (spaceIds.isEmpty()) return List.of();
         return documentMapper.selectList(new LambdaQueryWrapper<KbDocumentEntity>()
                 .in(KbDocumentEntity::getSpaceId, spaceIds)

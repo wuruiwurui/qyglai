@@ -6,8 +6,10 @@ import com.qyglai.automation.common.ApiResponse;
 import com.qyglai.automation.dto.ReportGenerateRequest;
 import com.qyglai.automation.dto.ReportSummary;
 import com.qyglai.automation.entity.ReportRecordEntity;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,8 +29,10 @@ public class ReportController {
     }
 
     @PostMapping("/generate")
-    public ApiResponse<ReportSummary> generate(@Valid @RequestBody ReportGenerateRequest request) {
-        return ApiResponse.ok(service.generateReport(request));
+    public ApiResponse<ReportSummary> generate(@Valid @RequestBody ReportGenerateRequest request,
+                                               Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.generateReport(request, principal.userId()));
     }
 
     /**
@@ -37,7 +41,8 @@ public class ReportController {
      * @return 报表列表
      */
     @GetMapping
-    public ApiResponse<List<ReportRecordEntity>> list() {
-        return ApiResponse.ok(service.listReports());
+    public ApiResponse<List<ReportRecordEntity>> list(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listReports(principal.userId(), principal.permissions().contains("*")));
     }
 }

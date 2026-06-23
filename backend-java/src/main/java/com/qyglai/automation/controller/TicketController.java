@@ -6,8 +6,10 @@ import com.qyglai.automation.common.ApiResponse;
 import com.qyglai.automation.dto.TextProcessRequest;
 import com.qyglai.automation.dto.TicketClassifyResult;
 import com.qyglai.automation.entity.TicketEntity;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,7 +39,8 @@ public class TicketController {
      * @return 工单列表
      */
     @GetMapping
-    public ApiResponse<List<TicketEntity>> list() {
-        return ApiResponse.ok(service.listTickets());
+    public ApiResponse<List<TicketEntity>> list(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listTickets(principal.userId(), principal.permissions().contains("*")));
     }
 }

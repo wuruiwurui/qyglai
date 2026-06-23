@@ -6,8 +6,10 @@ import com.qyglai.automation.common.ApiResponse;
 import com.qyglai.automation.dto.ExtractionResult;
 import com.qyglai.automation.dto.TextProcessRequest;
 import com.qyglai.automation.entity.InvoiceRecordEntity;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,8 +29,10 @@ public class InvoiceController {
     }
 
     @PostMapping("/parse")
-    public ApiResponse<ExtractionResult> parse(@Valid @RequestBody TextProcessRequest request) {
-        return ApiResponse.ok(service.parseInvoice(request));
+    public ApiResponse<ExtractionResult> parse(@Valid @RequestBody TextProcessRequest request,
+                                               Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.parseInvoice(request, principal.userId()));
     }
 
     /**
@@ -37,7 +41,8 @@ public class InvoiceController {
      * @return 发票列表
      */
     @GetMapping
-    public ApiResponse<List<InvoiceRecordEntity>> list() {
-        return ApiResponse.ok(service.listInvoices());
+    public ApiResponse<List<InvoiceRecordEntity>> list(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listInvoices(principal.userId(), principal.permissions().contains("*")));
     }
 }

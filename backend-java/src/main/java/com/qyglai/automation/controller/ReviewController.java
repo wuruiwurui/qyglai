@@ -5,8 +5,10 @@ import java.util.List;
 import com.qyglai.automation.common.ApiResponse;
 import com.qyglai.automation.dto.ReviewCompleteRequest;
 import com.qyglai.automation.dto.ReviewTask;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,8 +29,9 @@ public class ReviewController {
     }
 
     @GetMapping("/tasks")
-    public ApiResponse<List<ReviewTask>> tasks() {
-        return ApiResponse.ok(service.listReviewTasks());
+    public ApiResponse<List<ReviewTask>> tasks(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listReviewTasks(principal.userId(), principal.permissions().contains("*")));
     }
 
     /**
@@ -39,7 +42,11 @@ public class ReviewController {
      * @return 是否成功
      */
     @PutMapping("/tasks/{id}/complete")
-    public ApiResponse<Boolean> complete(@PathVariable Long id, @Valid @RequestBody ReviewCompleteRequest request) {
-        return ApiResponse.ok(service.completeReviewTask(id, request.result()));
+    public ApiResponse<Boolean> complete(@PathVariable Long id,
+                                         @Valid @RequestBody ReviewCompleteRequest request,
+                                         Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.completeReviewTask(id, request.result(), principal.userId(),
+                principal.permissions().contains("*")));
     }
 }

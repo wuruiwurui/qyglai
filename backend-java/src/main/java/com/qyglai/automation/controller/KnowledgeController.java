@@ -13,10 +13,12 @@ import com.qyglai.automation.dto.KnowledgeVectorStatus;
 import com.qyglai.automation.entity.FileAssetEntity;
 import com.qyglai.automation.entity.KbDocumentEntity;
 import com.qyglai.automation.entity.KbSpaceEntity;
+import com.qyglai.automation.security.JwtPrincipal;
 import com.qyglai.automation.service.AutomationWorkspaceService;
 import com.qyglai.automation.service.JavaFileParserService;
 import com.qyglai.automation.service.KnowledgeRagService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -76,8 +78,9 @@ public class KnowledgeController {
      * 查询知识库空间。
      */
     @GetMapping("/spaces")
-    public ApiResponse<List<KbSpaceEntity>> spaces() {
-        return ApiResponse.ok(ragService.listSpaces());
+    public ApiResponse<List<KbSpaceEntity>> spaces(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(ragService.listSpaces(principal.userId(), principal.permissions().contains("*")));
     }
 
     /**
@@ -94,8 +97,10 @@ public class KnowledgeController {
     @PostMapping("/documents/file")
     public ApiResponse<KnowledgeIndexResult> indexFile(@RequestPart("file") MultipartFile file,
                                                        @RequestParam Long spaceId,
-                                                       @RequestParam(required = false) String title) {
-        FileAssetEntity asset = workspaceService.uploadFile(file, "kb");
+                                                       @RequestParam(required = false) String title,
+                                                       Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        FileAssetEntity asset = workspaceService.uploadFile(file, "kb", principal.userId());
         String rawText = fileParserService.parse(file).rawText();
         String documentTitle = title == null || title.isBlank() ? asset.getOriginalName() : title;
         return ApiResponse.ok(ragService.indexFile(spaceId, asset.getId(), documentTitle, rawText));
@@ -105,8 +110,10 @@ public class KnowledgeController {
      * 查询已建立索引的知识库文档。
      */
     @GetMapping("/documents")
-    public ApiResponse<List<KbDocumentEntity>> documents(@RequestParam(required = false) String scope) {
-        return ApiResponse.ok(ragService.listDocuments(scope));
+    public ApiResponse<List<KbDocumentEntity>> documents(@RequestParam(required = false) String scope,
+                                                         Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(ragService.listDocuments(scope, principal.userId(), principal.permissions().contains("*")));
     }
 
     /** 查询豆包Embedding与Milvus真实向量链路状态。 */

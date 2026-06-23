@@ -17,12 +17,16 @@
     <section v-if="tab === 'tasks'" class="workflow-columns">
       <section class="workflow-list-panel">
         <div class="file-section-head"><div><p>待办中心</p><h2>需要我审批</h2></div><span class="status-chip">{{ notice }}</span></div>
-        <button v-for="task in tasks" :key="task.id" class="workflow-list-item" :class="{ active: selectedTask?.id === task.id }" type="button" @click="selectTask(task)">
+        <div class="workflow-filter-bar">
+          <label><span>搜索待办</span><input v-model="taskSearch" placeholder="节点、实例、处理人" /></label>
+          <label><span>时效</span><select v-model="taskDueFilter"><option value="all">全部待办</option><option value="overdue">已逾期</option><option value="today">今日到期</option></select></label>
+        </div>
+        <button v-for="task in filteredTasks" :key="task.id" class="workflow-list-item" :class="{ active: selectedTask?.id === task.id, overdue: isOverdue(task.dueTime) }" type="button" @click="selectTask(task)">
           <span class="workflow-node-icon"><ClipboardCheck :size="17" /></span>
           <span><strong>{{ task.nodeName }}</strong><small>实例 {{ task.instanceId }} · {{ formatDate(task.dueTime) }} 截止</small></span>
-          <em>待审批</em>
+          <em :class="dueState(task.dueTime)">{{ dueLabel(task.dueTime) }}</em>
         </button>
-        <div v-if="!tasks.length" class="file-empty">当前没有审批待办</div>
+        <div v-if="!filteredTasks.length" class="file-empty">当前没有匹配的审批待办</div>
       </section>
 
       <section class="workflow-detail-panel">
@@ -61,11 +65,16 @@
     <section v-if="tab === 'instances'" class="workflow-columns">
       <section class="workflow-list-panel">
         <div class="file-section-head"><div><p>流程监控</p><h2>全部审批实例</h2></div></div>
-        <button v-for="instance in instances" :key="instance.id" class="workflow-list-item" :class="{ active: detail?.instance.id === instance.id }" type="button" @click="selectInstance(instance.id)">
+        <div class="workflow-filter-bar">
+          <label><span>实例状态</span><select v-model="instanceStatusFilter"><option value="all">全部状态</option><option value="running">审批中</option><option value="approved">已通过</option><option value="rejected">已驳回</option><option value="withdrawn">已撤回</option></select></label>
+          <label><span>搜索实例</span><input v-model="instanceSearch" placeholder="流程、业务类型、实例ID" /></label>
+        </div>
+        <button v-for="instance in filteredInstances" :key="instance.id" class="workflow-list-item" :class="{ active: detail?.instance.id === instance.id }" type="button" @click="selectInstance(instance.id)">
           <span class="workflow-node-icon"><Route :size="17" /></span>
           <span><strong>{{ definitionName(instance.definitionId) }}</strong><small>{{ instance.businessType }} · {{ formatDate(instance.startedAt) }}</small></span>
           <em :class="instance.status">{{ statusLabel(instance.status) }}</em>
         </button>
+        <div v-if="!filteredInstances.length" class="file-empty">当前没有匹配的流程实例</div>
       </section>
       <section class="workflow-detail-panel">
         <template v-if="detail">
@@ -117,6 +126,10 @@
         <div><strong>当前版本 V{{ selectedDefinition.versionNo }}</strong><small>{{ versionNodeSummary(selectedDefinition) }}</small></div>
         <div><strong>上一版本 V{{ previousDefinition.versionNo }}</strong><small>{{ versionNodeSummary(previousDefinition) }}</small></div>
         <p>{{ versionDifference }}</p>
+      </section>
+      <section v-if="validationIssues.length" class="workflow-validation-panel">
+        <strong><ShieldCheck :size="16" />校验问题</strong>
+        <ul><li v-for="issue in validationIssues" :key="issue">{{ issue }}</li></ul>
       </section>
 
       <section class="workflow-designer">
@@ -230,6 +243,11 @@ const selectedTask = ref<WorkflowTask | null>(null);
 const comment = ref("");
 const targetUserId = ref("");
 const notice = ref("工作流已就绪");
+const taskSearch = ref("");
+const taskDueFilter = ref<"all" | "overdue" | "today">("all");
+const instanceStatusFilter = ref("all");
+const instanceSearch = ref("");
+const validationIssues = ref<string[]>([]);
 type WorkflowAiResult = {
   decision: string; confidence: number; summary: string; risks: string[];
   autoApproved: boolean; modelSuccess: boolean; modelName?: string; fallbackReason?: string;
@@ -303,6 +321,22 @@ const versionDifference = computed(() => {
 const enabledDefinitions = computed(() => definitions.value.filter((item) => item.status === "enabled"));
 const runningCount = computed(() => instances.value.filter((item) => item.status === "running").length);
 const approvedCount = computed(() => instances.value.filter((item) => item.status === "approved").length);
+const filteredTasks = computed(() => {
+  const keyword = taskSearch.value.trim().toLowerCase();
+  return tasks.value
+    .filter((task) => taskDueFilter.value === "all" || dueState(task.dueTime) === taskDueFilter.value)
+    .filter((task) => !keyword || [task.nodeName, task.nodeCode, task.instanceId, task.assigneeUserId].some((value) => String(value ?? "").toLowerCase().includes(keyword)))
+    .sort((a, b) => new Date(a.dueTime ?? "2999-12-31").getTime() - new Date(b.dueTime ?? "2999-12-31").getTime());
+});
+const filteredInstances = computed(() => {
+  const keyword = instanceSearch.value.trim().toLowerCase();
+  return instances.value
+    .filter((instance) => instanceStatusFilter.value === "all" || instance.status === instanceStatusFilter.value)
+    .filter((instance) => {
+      const haystack = [instance.id, definitionName(instance.definitionId), instance.businessType, instance.businessId, instance.currentNode].join(" ").toLowerCase();
+      return !keyword || haystack.includes(keyword);
+    });
+});
 
 onMounted(loadAll);
 
@@ -346,8 +380,20 @@ async function withdrawSelectedInstance() {
 
 async function act(action: string) {
   if (!selectedTask.value) return;
+  if (action === "reject" && !comment.value.trim()) {
+    notice.value = "驳回必须填写审批意见";
+    return;
+  }
+  if (action === "transfer" && !targetUserId.value.trim()) {
+    notice.value = "转交必须填写目标用户ID";
+    return;
+  }
   try {
-    detail.value = await handleWorkflowTask(selectedTask.value.id, { action, comment: comment.value, targetUserId: targetUserId.value || null });
+    detail.value = await handleWorkflowTask(selectedTask.value.id, {
+      action,
+      comment: comment.value,
+      targetUserId: targetUserId.value ? Number(targetUserId.value) : null
+    });
     notice.value = actionLabel(action);
     selectedTask.value = null;
     comment.value = "";
@@ -378,9 +424,10 @@ async function submitStart() {
 async function submitDefinition(status = "enabled") {
   try {
     const payload = definitionPayload(status);
-    const issues = await validateWorkflowDefinition(payload);
-    if (issues.length) throw new Error(issues.join("；"));
+    validationIssues.value = await validateWorkflowDefinition(payload);
+    if (validationIssues.value.length) throw new Error(validationIssues.value.join("；"));
     await saveWorkflowDefinition(payload);
+    validationIssues.value = [];
     notice.value = status === "draft" ? "流程草稿已保存并共享" : "流程新版本已发布";
     await loadAll();
   } catch (error) {
@@ -390,9 +437,10 @@ async function submitDefinition(status = "enabled") {
 
 async function validateDefinition() {
   try {
-    const issues = await validateWorkflowDefinition(definitionPayload(definitionForm.value.status));
-    notice.value = issues.length ? `校验发现：${issues.join("；")}` : "流程校验通过，可以保存或发布";
+    validationIssues.value = await validateWorkflowDefinition(definitionPayload(definitionForm.value.status));
+    notice.value = validationIssues.value.length ? `校验发现 ${validationIssues.value.length} 个问题` : "流程校验通过，可以保存或发布";
   } catch (error) {
+    validationIssues.value = [errorMessage(error)];
     notice.value = errorMessage(error);
   }
 }
@@ -408,6 +456,8 @@ function copyDefinition() {
 
 function definitionPayload(status: string) {
   if (!designerNodes.value.length) throw new Error("流程至少需要一个审批节点");
+  const localIssues = localDefinitionIssues();
+  if (localIssues.length) throw new Error(localIssues.join("；"));
   const nodes = designerNodes.value.map((node) => {
     const assigneeUserIds = (node.assigneeUserIdsText ?? "").split(",").map(value => value.trim()).filter(Boolean).map(Number);
     return {
@@ -518,6 +568,7 @@ function nodeIcon(type: string) {
 
 function loadSelectedDefinition() {
   showVersionCompare.value = false;
+  validationIssues.value = [];
   const definition = definitions.value.find((item) => item.id === selectedDefinitionId.value);
   if (!definition) {
     definitionForm.value = { workflowCode: "custom_approval", workflowName: "自定义审批流程", scenario: "custom", status: "enabled", definitionJson: "" };
@@ -584,6 +635,38 @@ function nodeNames(item: WorkflowDefinition) {
 
 function statusLabel(value: string) {
   return ({ running: "审批中", approved: "已通过", rejected: "已驳回", pending: "待审批", withdrawn: "已撤回" } as Record<string, string>)[value] || value;
+}
+
+function dueState(value?: string) {
+  if (!value) return "all";
+  const due = new Date(value);
+  const now = new Date();
+  if (due.getTime() < now.getTime()) return "overdue";
+  return due.toDateString() === now.toDateString() ? "today" : "all";
+}
+
+function dueLabel(value?: string) {
+  return ({ overdue: "已逾期", today: "今日到期", all: "待审批" } as Record<string, string>)[dueState(value)];
+}
+
+function isOverdue(value?: string) {
+  return dueState(value) === "overdue";
+}
+
+function localDefinitionIssues() {
+  const issues: string[] = [];
+  const codes = designerNodes.value.map((node) => node.code.trim()).filter(Boolean);
+  const duplicates = codes.filter((code, index) => codes.indexOf(code) !== index);
+  if (duplicates.length) issues.push(`节点编码重复：${[...new Set(duplicates)].join("、")}`);
+  designerNodes.value.forEach((node, index) => {
+    if (!node.code.trim()) issues.push(`第 ${index + 1} 个节点缺少节点编码`);
+    if (!node.name.trim()) issues.push(`第 ${index + 1} 个节点缺少节点名称`);
+    if (!Number.isFinite(Number(node.dueHours)) || Number(node.dueHours) < 1) issues.push(`${node.name || node.code || `第 ${index + 1} 个节点`} 的处理时限必须大于 0`);
+    const assigneeValues = [node.assigneeUserId, ...(node.assigneeUserIdsText ?? "").split(",")].map((value) => String(value ?? "").trim()).filter(Boolean);
+    if (assigneeValues.some((value) => !/^\d+$/.test(value))) issues.push(`${node.name || node.code} 的审批人ID只能填写数字`);
+    if (node.conditionVariable && !node.conditionValue?.trim()) issues.push(`${node.name || node.code} 配置了条件变量但没有填写条件值`);
+  });
+  return issues;
 }
 
 function actionLabel(value: string) {

@@ -53,8 +53,9 @@ public class FileAssetController {
      * @return 文件资产列表
      */
     @GetMapping
-    public ApiResponse<List<FileAssetEntity>> list() {
-        return ApiResponse.ok(service.listFiles());
+    public ApiResponse<List<FileAssetEntity>> list(Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.listFiles(principal.userId(), principal.permissions().contains("*")));
     }
 
     /**
@@ -64,8 +65,9 @@ public class FileAssetController {
      * @return 文件详情
      */
     @GetMapping("/{id}/detail")
-    public ApiResponse<FileAssetDetail> detail(@PathVariable Long id) {
-        return ApiResponse.ok(service.getFileDetail(id));
+    public ApiResponse<FileAssetDetail> detail(@PathVariable Long id, Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.getFileDetail(id, principal.userId(), principal.permissions().contains("*")));
     }
 
     /**
@@ -77,8 +79,10 @@ public class FileAssetController {
      */
     @PostMapping("/upload")
     public ApiResponse<FileAssetEntity> upload(@RequestPart("file") MultipartFile file,
-                                               @RequestParam(defaultValue = "general") String businessType) {
-        return ApiResponse.ok(service.uploadFile(file, businessType));
+                                               @RequestParam(defaultValue = "general") String businessType,
+                                               Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        return ApiResponse.ok(service.uploadFile(file, businessType, principal.userId()));
     }
 
     /**
@@ -125,6 +129,7 @@ public class FileAssetController {
                                                        @Valid @RequestBody FileFieldConfirmRequest request,
                                                        Authentication authentication) {
         JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        service.getFileDetail(id, principal.userId(), principal.permissions().contains("*"));
         return ApiResponse.ok(correctionService.correct(id, request.fields(), request.reason(),
                 principal.userId(), principal.username()));
     }
@@ -136,7 +141,10 @@ public class FileAssetController {
      * @return 字段修正历史
      */
     @GetMapping("/{id}/corrections")
-    public ApiResponse<List<FieldCorrectionHistoryEntity>> corrections(@PathVariable Long id) {
+    public ApiResponse<List<FieldCorrectionHistoryEntity>> corrections(@PathVariable Long id,
+                                                                       Authentication authentication) {
+        JwtPrincipal principal = (JwtPrincipal) authentication.getPrincipal();
+        service.getFileDetail(id, principal.userId(), principal.permissions().contains("*"));
         return ApiResponse.ok(correctionService.listByFile(id));
     }
 }

@@ -50,6 +50,6 @@ class WorkflowApprovalServiceDefinitionTest {
                 mock(WorkflowDefinitionMapper.class), mock(WorkflowInstanceMapper.class),
                 mock(WorkflowTaskMapper.class), mock(WorkflowActionLogMapper.class),
                 mock(AuditService.class), mock(BusinessApprovalStatusService.class),
-                mock(WorkflowAiNodeService.class), new ObjectMapper());
+                mock(WorkflowAiNodeService.class), new ObjectMapper(), mock(DataPermissionService.class));
     }
 }
